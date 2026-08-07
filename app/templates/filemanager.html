@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VPS 文件管理器 - Trade Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
+<link href="/static/css/filemanager.css" rel="stylesheet">
+</head>
+<body>
+
+<!-- 顶栏 -->
+<header class="topbar">
+    <div class="logo">
+        <div class="icon"><i class="bi bi-folder2-open"></i></div>
+        <div>VPS 文件管理器<small>仅管理员 · 全盘文件</small></div>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn" id="diskBtn" title="查看磁盘占用"><i class="bi bi-hdd"></i> 磁盘</button>
+    <a class="btn" href="/" title="返回主站"><i class="bi bi-box-arrow-left"></i> 返回主站</a>
+</header>
+
+<!-- 路径栏 -->
+<div class="pathbar">
+    <div class="crumbs" id="crumbs"></div>
+    <input class="pathinput" id="pathInput" spellcheck="false" placeholder="输入绝对路径后回车，如 /opt/customer-develop">
+    <select class="quickjump" id="quickJump" title="快捷路径"></select>
+    <button class="btn" id="homeBtn" title="回到根目录 /"><i class="bi bi-house"></i></button>
+    <button class="btn" id="upBtn" title="上一级目录"><i class="bi bi-arrow-up-circle"></i></button>
+</div>
+
+<!-- 工具栏 -->
+<div class="toolbar">
+    <button class="btn primary" id="uploadBtn"><i class="bi bi-upload"></i> 上传文件</button>
+    <button class="btn" id="mkdirBtn"><i class="bi bi-folder-plus"></i> 新建文件夹</button>
+    <button class="btn" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+    <input type="file" id="fileInput" multiple class="hidden">
+    <div class="filter">
+        <input type="text" id="filterInput" placeholder="筛选当前目录文件…">
+    </div>
+    <span class="count" id="count"></span>
+</div>
+
+<!-- 文件表格 -->
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th id="th-name" style="width:auto;">名称 <span class="sort"></span></th>
+                <th id="th-size" style="width:110px;">大小 <span class="sort"></span></th>
+                <th id="th-mtime" style="width:170px;">修改时间 <span class="sort"></span></th>
+                <th style="width:70px;">权限</th>
+                <th style="width:190px; text-align:right;">操作</th>
+            </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+    </table>
+</div>
+
+<!-- 新建文件夹弹窗 -->
+<div class="modal-mask" id="mkdirModal">
+    <div class="modal">
+        <h3><i class="bi bi-folder-plus"></i> 新建文件夹</h3>
+        <div class="sub">当前位置: <code id="mkdirPath"></code></div>
+        <input type="text" id="mkdirName" placeholder="文件夹名称">
+        <div class="m-actions">
+            <button class="btn btn-cancel">取消</button>
+            <button class="btn primary" id="mkdirOk">创建</button>
+        </div>
+    </div>
+</div>
+
+<!-- 重命名弹窗 -->
+<div class="modal-mask" id="renameModal">
+    <div class="modal">
+        <h3><i class="bi bi-pencil-square"></i> 重命名</h3>
+        <div class="sub">原路径: <code id="renameSub"></code></div>
+        <input type="text" id="renameName" placeholder="新名称">
+        <div class="m-actions">
+            <button class="btn btn-cancel">取消</button>
+            <button class="btn primary" id="renameOk">重命名</button>
+        </div>
+    </div>
+</div>
+
+<!-- 移动弹窗 -->
+<div class="modal-mask" id="moveModal">
+    <div class="modal">
+        <h3><i class="bi bi-arrows-move"></i> 移动到</h3>
+        <div class="sub" id="moveSub"></div>
+        <input type="text" id="moveDest" placeholder="目标目录绝对路径，如 /opt/backups">
+        <div class="m-actions">
+            <button class="btn btn-cancel">取消</button>
+            <button class="btn primary" id="moveOk">移动</button>
+        </div>
+    </div>
+</div>
+
+<!-- 删除弹窗 -->
+<div class="modal-mask" id="deleteModal">
+    <div class="modal">
+        <h3 style="color:#fca5a5;"><i class="bi bi-trash3"></i> 确认删除</h3>
+        <div class="sub">将永久删除: <code id="deleteSub"></code></div>
+        <label class="check hidden" id="deleteRecursiveWrap">
+            <input type="checkbox" id="deleteRecursive">
+            递归删除整个目录内容（不可恢复）
+        </label>
+        <div class="m-actions">
+            <button class="btn btn-cancel">取消</button>
+            <button class="btn danger" id="deleteOk" style="border-color:var(--danger); color:#fca5a5;">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<!-- 磁盘弹窗 -->
+<div class="modal-mask" id="diskModal">
+    <div class="modal">
+        <h3><i class="bi bi-hdd"></i> 磁盘使用情况</h3>
+        <div class="sub">根分区 /</div>
+        <div class="disk-grid">
+            <div class="disk-item"><div class="v" id="diskTotal">-</div><div class="l">总容量</div></div>
+            <div class="disk-item"><div class="v" id="diskUsed">-</div><div class="l">已用</div></div>
+            <div class="disk-item"><div class="v" id="diskFree">-</div><div class="l">可用</div></div>
+        </div>
+        <div class="bar"><div class="fill" id="diskBar" style="width:0%"></div></div>
+        <div class="m-actions" style="margin-top:16px;">
+            <button class="btn btn-cancel">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 上传进度 -->
+<div class="upload-list" id="uploadList"></div>
+
+<!-- Toast -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- 加载遮罩 -->
+<div id="loading">
+    <div class="spinner"></div>
+    <div>加载中…</div>
+</div>
+
+<script src="/static/js/filemanager.js"></script>
+</body>
+</html>

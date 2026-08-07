@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+settings.local.json
+
+# Conversation exports
+*-this-session-is-being-continued-from-*.txt
+
+# Database (含 WAL/journal 附属文件，避免真实客户数据入库)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+
+# Test
+.pytest_cache/
+test_api.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.env.local
+
+# VPS Deployment data (Docker volumes mapped to host)
+searxng/data/
+/data/
+
+# Reference/内部文档（不发布）
+llmprovider.md
+*this-session*.md
+
+# Logs
+*.log
+
+# Stray files
+=2.4.0
+npm
+ssh service/
+
+# Debug
+debug_main.py
+debug_*.py
+
+# Reference docs
+Hunter's API Reference V2.html
+Hunter's API Reference V2_files/
+people-api-search.md
+people-enrichment.md
+"Hunter\351\202\256\347\256\261\346\237\245\346\211\276\346\226\271\346\241\210.md"
+
+# Uploads
+app/uploads/
+
+# GitHub Pages 展示落地页（引用已移除的 website/ 截图，不同步）
+/index.html
+website/
+
+# Round 3: 用户 API Key 加密密钥（切勿提交）
+app/.config_encryption_key
+
+# SSL 证书（含私钥，切勿提交）
+certs/*.pem
+certs/*.key
+certs/*.csr
+# 备份目录
+backups/
+
+website/
+index.html/

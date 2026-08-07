@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Hunter 邮箱查找 - AI Trade Customer Analyzer{% endblock %}
+{% block page_title %}<i class="bi bi-envelope-at me-2"></i>Hunter 邮箱查找{% endblock %}
+
+{% block top_bar_actions %}
+<span id="hunterConfigBadge" class="badge rounded-pill bg-secondary">检查配置中...</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-subtitle text-muted small mb-4">通过 Hunter.io API 查找公司内部联系人的工作邮箱，支持域名搜索和姓名精确查找</div>
+
+<!-- 快捷查找 -->
+<div class="card border-0 mb-4" data-animate>
+    <div class="card-header"><i class="bi bi-search"></i> 快捷查找邮箱</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">公司域名 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="hQuickDomain" placeholder="如 stripe.com">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">联系人名（可选）</label>
+                <input type="text" class="form-control" id="hQuickFirstName" placeholder="如 Patrick">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">联系人姓（可选）</label>
+                <input type="text" class="form-control" id="hQuickLastName" placeholder="如 Collison">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-accent w-100" onclick="quickHunterSearch()" id="btnQuickSearch">
+                    <i class="bi bi-search me-1"></i>查找
+                </button>
+            </div>
+        </div>
+        <div class="row g-3 mt-1">
+            <div class="col-md-3">
+                <label class="form-label">部门筛选</label>
+                <select class="form-select form-select-sm" id="hQuickDepartment">
+                    <option value="">所有部门</option>
+                    <option value="executive">高管</option>
+                    <option value="it">技术</option>
+                    <option value="sales">销售</option>
+                    <option value="marketing">市场</option>
+                    <option value="finance">财务</option>
+                    <option value="hr">人事</option>
+                    <option value="legal">法务</option>
+                    <option value="support">客服</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">级别筛选</label>
+                <select class="form-select form-select-sm" id="hQuickSeniority">
+                    <option value="">所有级别</option>
+                    <option value="junior">初级</option>
+                    <option value="senior">高级/总监</option>
+                    <option value="executive">高管/CXO</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 查找结果 -->
+<div id="hQuickResult" class="d-none mb-4"></div>
+<div id="hQuickLoading" class="d-none mb-4">
+    <div class="card border-0">
+        <div class="card-body text-center py-5">
+            <div class="spinner-border text-teal mb-3" role="status" style="color:var(--accent-600)"></div>
+            <p class="text-muted">正在通过 Hunter 查询邮箱，请稍候...</p>
+            <div class="progress" style="max-width:300px;margin:0 auto;height:4px">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%;background:linear-gradient(90deg,var(--accent-600),var(--accent-400))"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 使用统计 -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4" data-animate data-delay="100">
+        <div class="card border-0 h-100">
+            <div class="card-header"><i class="bi bi-bar-chart"></i> 配额统计</div>
+            <div class="card-body">
+                <div id="usageStatsContainer">
+                    <p class="text-muted small mb-0">加载中...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4" data-animate data-delay="200">
+        <div class="card border-0 h-100">
+            <div class="card-header"><i class="bi bi-database"></i> 缓存统计</div>
+            <div class="card-body">
+                <div id="cacheStatsContainer">
+                    <p class="text-muted small mb-0">加载中...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4" data-animate data-delay="300">
+        <div class="card border-0 h-100">
+            <div class="card-header"><i class="bi bi-tools"></i> 管理</div>
+            <div class="card-body d-flex flex-column gap-2">
+                <button class="btn btn-outline-primary btn-sm" onclick="refreshUsage()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>刷新统计
+                </button>
+                <button class="btn btn-outline-danger btn-sm" onclick="clearHunterCache()">
+                    <i class="bi bi-trash me-1"></i>清除缓存
+                </button>
+                <p class="text-muted small mb-0 mt-1">
+                    <i class="bi bi-info-circle"></i> 清除缓存后下次查询将消耗真实 API 额度。
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 使用说明 -->
+<div class="card border-0 mb-4" data-animate>
+    <div class="card-header"><i class="bi bi-book"></i> 使用说明</div>
+    <div class="card-body">
+        <div class="row g-4">
+            <div class="col-md-6">
+                <h6 class="fw-semibold"><i class="bi bi-1-circle me-1"></i> 配置 API Key</h6>
+                <p class="text-muted small">
+                    在启动前设置环境变量 <code>HUNTER_API_KEY</code>：
+                </p>
+                <pre class="bg-light p-2 rounded" style="font-size:0.85rem"># Windows (cmd)
+set HUNTER_API_KEY=your_key_here
+
+# Windows (PowerShell)
+$env:HUNTER_API_KEY="your_key_here"
+
+# Linux/Mac
+export HUNTER_API_KEY=your_key_here</pre>
+                <p class="text-muted small">
+                    测试时可使用 <code>test-api-key</code>（返回测试数据）。
+                    <br>获取正式 Key：<a href="https://hunter.io/api-keys" target="_blank">https://hunter.io/api-keys</a>
+                </p>
+            </div>
+
+            <div class="col-md-6">
+                <h6 class="fw-semibold"><i class="bi bi-2-circle me-1"></i> 套餐额度</h6>
+                <table class="table table-sm small">
+                    <thead>
+                        <tr>
+                            <th>套餐</th>
+                            <th>搜索/月</th>
+                            <th>验证/月</th>
+                            <th>每页最多</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Free</td><td>25</td><td>50</td><td>10 条</td></tr>
+                        <tr><td>Starter</td><td>500</td><td>1,000</td><td>10 条</td></tr>
+                        <tr><td>Growth</td><td>5,000</td><td>10,000</td><td>100 条</td></tr>
+                        <tr><td>Business</td><td>15,000</td><td>30,000</td><td>100 条</td></tr>
+                    </tbody>
+                </table>
+                <p class="text-muted small mb-0">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Free 和 Starter 不支持分页，最多返回 10 条结果。
+                </p>
+            </div>
+
+            <div class="col-md-6">
+                <h6 class="fw-semibold"><i class="bi bi-3-circle me-1"></i> 查找策略（额度优化）</h6>
+                <ol class="small text-muted" style="line-height:1.8">
+                    <li><strong>Email Count（免费）</strong> — 先查该公司有多少邮箱，如果 total=0 直接返回，不消耗搜索额度。</li>
+                    <li><strong>本地缓存优先</strong> — 所有结果缓存 7 天，相同域名+参数的查询直接从缓存读取。</li>
+                    <li><strong>Domain Search 自带验证</strong> — 域名搜索结果含 verification，不额外调用 Verifier。</li>
+                    <li><strong>智能降级</strong> — 已知姓名时先在 Domain Search 结果中匹配，找不到才触发 Email Finder。</li>
+                    <li><strong>结果过滤</strong> — 可在客户端按部门/级别筛选，无需多次 API 调用。</li>
+                </ol>
+            </div>
+
+            <div class="col-md-6">
+                <h6 class="fw-semibold"><i class="bi bi-4-circle me-1"></i> 集成到客户详情页</h6>
+                <p class="text-muted small">
+                    进入任意客户详情页 → 点击 <span class="badge bg-info">Hunter 查邮箱</span> 按钮 →
+                    系统自动使用该公司域名查询 Hunter 数据库 →
+                    可在输入框中填写联系人姓名进行精确查找。
+                </p>
+                <p class="text-muted small mb-0">
+                    <i class="bi bi-link-45deg me-1"></i>
+                    也可在导航栏点击 <strong>Hunter 邮箱</strong> 进入独立查找页面，直接输入域名和姓名进行搜索。
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/hunter.js"></script>
+{% endblock %}

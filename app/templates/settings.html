@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}AI 与 API 设置 - AI Trade Customer Analyzer{% endblock %}
+{% block page_title %}<i class="bi bi-key-fill me-2"></i>AI 与 API 设置{% endblock %}
+
+{% block top_bar_actions %}
+<button class="btn btn-sm btn-outline-primary" onclick="loadAll()">
+    <i class="bi bi-arrow-clockwise me-1"></i>刷新
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="page-subtitle text-muted small mb-4">
+    配置你自己的 AI 模型、搜索引擎与邮箱服务 API Key。
+    <span class="badge rounded-pill bg-info text-dark ms-1">用户配置优先</span>
+    <span class="text-muted">未配置的服务自动回退服务器环境变量，Key 加密存储，仅自己可见。</span>
+</div>
+
+<div class="row">
+    <!-- ═══════════ AI 模型配置 ═══════════ -->
+    <div class="col-lg-7">
+        <div class="card border-0 mb-4" data-animate data-delay="100">
+            <div class="card-header d-flex align-items-center">
+                <i class="bi bi-cpu"></i> AI 模型（LLM）
+                <span class="ms-auto" id="llmStatusBadge"></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">用于客户官网 AI 分析、关键词扩展与相似客户查找。支持自动 Fallback 到备用模型。</p>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Provider <span class="text-danger">*</span></label>
+                        <select class="form-select" id="llmProvider" onchange="onProviderChange()">
+                            <option value="glm">智谱 GLM（推荐，免费）</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="qwen">通义千问 Qwen</option>
+                            <option value="moonshot">Moonshot Kimi</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="custom">OpenAI 兼容 / 自定义</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">API Key</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="llmApiKey" placeholder="sk-..." autocomplete="off">
+                            <button class="btn btn-outline-secondary" type="button" onclick="toggleKey('llmApiKey', this)"><i class="bi bi-eye"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Base URL</label>
+                        <input type="text" class="form-control" id="llmBaseUrl" placeholder="https://...">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">默认模型</label>
+                        <input type="text" class="form-control" id="llmDefaultModel" placeholder="glm-4.7-flash" list="modelSuggest">
+                        <datalist id="modelSuggest"></datalist>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">备用模型（逗号分隔，主模型失败时自动降级）</label>
+                        <input type="text" class="form-control" id="llmFallbackModels" placeholder="glm-4.6v-flash, glm-4-flash-250414">
+                    </div>
+                </div>
+
+                <div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
+                    <button class="btn btn-outline-info" onclick="testLlmConnection()" id="btnTestLlm">
+                        <i class="bi bi-plug me-1"></i>测试连接
+                    </button>
+                    <button class="btn btn-accent" onclick="saveLlmConfig()" id="btnSaveLlm">
+                        <i class="bi bi-floppy me-1"></i>保存配置
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="deleteService('llm')">
+                        <i class="bi bi-trash me-1"></i>删除我的配置
+                    </button>
+                    <span id="llmTestResult" class="small"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════ 邮箱服务配置 ═══════════ -->
+        <div class="card border-0 mb-4" data-animate data-delay="200">
+            <div class="card-header">
+                <i class="bi bi-envelope-paper"></i> 邮箱查找服务
+                <span class="ms-auto text-muted small fw-normal">瀑布式发现：Hunter → Tomba → Prospeo</span>
+            </div>
+            <div class="card-body">
+                <div id="emailServiceRows"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ 搜索引擎配置 ═══════════ -->
+    <div class="col-lg-5">
+        <div class="card border-0 mb-4" data-animate data-delay="150">
+            <div class="card-header d-flex align-items-center">
+                <i class="bi bi-search-heart"></i> 搜索引擎
+                <span class="ms-auto" id="searchEngineBadge"></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">配置搜索引擎用于客户发现。当前生效引擎：<strong id="currentEngineText">加载中...</strong></p>
+
+                <div class="mb-3">
+                    <label class="form-label">首选引擎</label>
+                    <div class="input-group">
+                        <select class="form-select" id="preferredEngine">
+                            <option value="tavily">Tavily（1000次/月免费）</option>
+                            <option value="serpapi">SerpAPI（250次/月免费）</option>
+                            <option value="searxng">SearXNG（自部署，零成本）</option>
+                        </select>
+                        <button class="btn btn-outline-primary" onclick="applyPreferredEngine()"><i class="bi bi-check-lg"></i></button>
+                    </div>
+                    <div class="form-text">仅当该引擎已配置 Key/URL 时才会生效；未配置时自动使用可用引擎。</div>
+                </div>
+
+                <div id="searchServiceRows"></div>
+            </div>
+        </div>
+
+        <!-- ═══════════ 说明 ═══════════ -->
+        <div class="card border-0 mb-4" data-animate data-delay="250">
+            <div class="card-header"><i class="bi bi-question-circle"></i> 说明</div>
+            <div class="card-body small text-muted">
+                <ul class="mb-0 ps-3">
+                    <li class="mb-1"><strong>用户配置优先</strong>：你保存的 Key 仅用于你自己的分析任务，不影响其他用户。</li>
+                    <li class="mb-1"><strong>环境变量回退</strong>：未保存某服务时，自动使用服务器的环境变量 Key（管理员配置）。</li>
+                    <li class="mb-1"><strong>加密存储</strong>：所有 Key 使用 Fernet 加密后入库，设置页仅显示后 4 位。</li>
+                    <li class="mb-1"><strong>搜索偏好</strong>：搜索引擎选择按用户记忆，后台发现任务自动套用。</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/settings.js"></script>
+{% endblock %}

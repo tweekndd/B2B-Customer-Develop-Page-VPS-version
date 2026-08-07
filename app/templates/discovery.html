@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block title %}客户发现 - AI Trade Customer Analyzer{% endblock %}
+{% block page_title %}<i class="bi bi-compass-fill me-2"></i>客户发现{% endblock %}
+
+{% block content %}
+<!-- 新建搜索任务 -->
+<div class="card border-0 mb-4" data-animate>
+    <div class="card-header">
+        <i class="bi bi-search"></i> 客户发现（Google 搜索 + AI 分析）
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">目标国家 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="discoveryCountry" placeholder="例如: Saudi Arabia" value="Saudi Arabia">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">行业关键词 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="discoveryKeyword" placeholder="例如: wastewater contractor" value="wastewater contractor">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">搜索深度</label>
+                <input type="number" class="form-control" id="discoveryDepth" value="50" min="10" max="200">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-accent w-100" onclick="startSearch()" id="btnStartSearch">
+                    <i class="bi bi-play-fill me-1"></i>开始搜索
+                </button>
+            </div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-12 d-flex align-items-center gap-3">
+                <button class="btn btn-outline-primary btn-sm" onclick="previewKeywords()" id="btnPreview">
+                    <i class="bi bi-magic me-1"></i>预览扩展关键词
+                </button>
+                <span id="previewResult" class="small text-muted"></span>
+                <div class="ms-auto d-flex align-items-center gap-2" id="engineSwitcher">
+                    <span class="small text-muted me-1"><i class="bi bi-arrow-left-right"></i> 搜索 API:</span>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary engine-btn" data-engine="searxng" onclick="switchSearchEngine('searxng')">
+                            <i class="bi bi-shield-lock me-1"></i>SearXNG
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary engine-btn" data-engine="tavily" onclick="switchSearchEngine('tavily')">
+                            <i class="bi bi-cloud-sun me-1"></i>Tavily
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary engine-btn" data-engine="serpapi" onclick="switchSearchEngine('serpapi')">
+                            <i class="bi bi-google me-1"></i>SerpAPI
+                        </button>
+                    </div>
+                    <span id="engineIndicator" class="badge rounded-pill" style="font-weight:400">—</span>
+                    <button class="btn btn-sm btn-link text-decoration-none text-muted p-0" onclick="loadSearchEngineConfig()" title="刷新状态">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 相似客户扩展 -->
+<div class="card border-0 mb-4" data-animate data-delay="100">
+    <div class="card-header">
+        <i class="bi bi-diagram-3"></i> 相似客户扩展（种子客户）
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-5">
+                <label class="form-label">目标公司网址 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="seedUrl" placeholder="例如: https://example-water.com">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">目标国家 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="seedCountry" placeholder="例如: Mexico" value="Mexico">
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button class="btn btn-primary w-100" onclick="findSimilarCompanies()" id="btnFindSimilar">
+                    <i class="bi bi-diagram-3 me-1"></i>查找相似客户
+                </button>
+            </div>
+        </div>
+        <div id="similarProgress" class="d-none mt-3">
+            <div class="d-flex align-items-center text-muted small">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                <span id="similarStatusText">正在分析目标公司并搜索相似客户...</span>
+            </div>
+            <div class="progress mt-2" style="height:6px">
+                <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width:100%"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 相似客户结果 -->
+<div id="similarResultCard" class="d-none card border-0 mb-4" data-animate>
+    <div class="card-header d-flex justify-content-between">
+        <span><i class="bi bi-diagram-3"></i> 相似客户结果</span>
+        <span class="badge bg-success rounded-pill" id="similarCount">0 个</span>
+    </div>
+    <div class="card-body">
+        <div id="seedInfo" class="alert alert-light border mb-3 small py-2">
+            <strong>种子公司：</strong><span id="seedName"></span>
+            <span class="ms-3"><strong>行业：</strong><span id="seedIndustry"></span></span>
+            <span class="ms-3"><strong>关键词：</strong><span id="seedKeywords"></span></span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:36px">
+                            <input type="checkbox" class="form-check-input" id="similarSelectAll" onchange="toggleAllSimilar(this.checked)">
+                        </th>
+                        <th>#</th>
+                        <th>公司名称</th>
+                        <th>网址</th>
+                        <th>国家</th>
+                        <th>相似度</th>
+                    </tr>
+                </thead>
+                <tbody id="similarTableBody">
+                    <tr><td colspan="6"><div class="table-empty-state" style="padding:1.5rem"><i class="bi bi-search"></i>暂无结果</div></td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="similarBatchBar" class="d-none mt-3 d-flex align-items-center gap-2">
+            <span class="small text-muted" id="similarSelectedCount">已选择 0 个</span>
+            <button class="btn btn-accent btn-sm" onclick="saveSelectedSimilar()" id="btnSaveSimilar">
+                <i class="bi bi-save me-1"></i>保存到客户列表
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 搜索状态提示 -->
+<div id="searchRunningBar" class="d-none alert alert-warning alert-banner mb-3" data-animate>
+    <div class="d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-hourglass-split"></i>
+            <div>
+                <strong id="searchStatusText">搜索任务进行中...</strong>
+                <br>
+                <small class="text-muted" id="searchProgressDetail">等待中...</small>
+            </div>
+        </div>
+        <button class="btn btn-sm btn-outline-danger" onclick="stopSearchTask()">
+            <i class="bi bi-stop-circle me-1"></i>停止任务
+        </button>
+    </div>
+    <div class="progress mt-2" style="height:8px">
+        <div id="searchProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width:0%"></div>
+    </div>
+    <div class="mt-2">
+        <button class="btn btn-sm btn-link p-0 text-decoration-none text-muted" type="button" data-bs-toggle="collapse" data-bs-target="#keywordListCollapse">
+            <i class="bi bi-list-ul"></i> 查看扩展关键词列表 <i class="bi bi-chevron-down small"></i>
+        </button>
+        <div class="collapse mt-1" id="keywordListCollapse">
+            <div id="keywordListContainer" class="d-flex flex-wrap gap-1"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 搜索任务历史 -->
+<div class="card border-0 mb-4" data-animate data-delay="100">
+    <div class="card-header d-flex justify-content-between">
+        <span><i class="bi bi-list-task"></i> 搜索任务历史</span>
+        <button class="btn btn-sm btn-outline-primary" onclick="loadTasks()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>国家</th>
+                        <th>关键词</th>
+                        <th>扩展数</th>
+                        <th>状态</th>
+                        <th>发现网站</th>
+                        <th>新增公司</th>
+                        <th>进度</th>
+                        <th>时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="taskTableBody">
+                    <tr><td colspan="10"><div class="table-empty-state" style="padding:1.5rem"><i class="bi bi-inbox"></i>暂无搜索任务</div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 发现结果列表 -->
+<div class="card border-0" data-animate data-delay="200">
+    <div class="card-header d-flex justify-content-between">
+        <span><i class="bi bi-globe"></i> Google 发现的公司</span>
+        <span class="badge bg-secondary rounded-pill" id="discoveredCount">0 个</span>
+    </div>
+    <div class="card-body">
+        <div class="filter-bar mb-3">
+            <input type="text" class="form-control" id="discSearch" placeholder="搜索公司名称..." oninput="loadDiscovered(true)">
+            <select class="form-select" id="discCountry" onchange="loadDiscovered(true)">
+                <option value="">所有国家</option>
+            </select>
+            <select class="form-select" id="discPriority" onchange="loadDiscovered(true)">
+                <option value="">所有优先级</option>
+                <option value="A">A 级</option><option value="B">B 级</option>
+                <option value="C">C 级</option><option value="D">D 级</option>
+            </select>
+            <select class="form-select" id="discKeyword" onchange="loadDiscovered(true)">
+                <option value="">所有关键词</option>
+            </select>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>公司名称</th>
+                        <th>国家</th>
+                        <th>网址</th>
+                        <th>邮箱</th>
+                        <th>发现关键词</th>
+                        <th>评分</th>
+                        <th>优先级</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="discoveredTableBody">
+                    <tr><td colspan="8"><div class="table-empty-state" style="padding:1.5rem"><i class="bi bi-search"></i>暂无发现结果，请先运行搜索任务</div></td></tr>
+                </tbody>
+            </table>
+        </div>
+        <nav class="mt-3" id="discPagination" style="display:none">
+            <ul class="pagination pagination-sm justify-content-center mb-0">
+                <li class="page-item" id="discPrevPage"><a class="page-link" href="#" onclick="changeDiscPage(-1)"><i class="bi bi-chevron-left"></i> 上一页</a></li>
+                <li class="page-item disabled"><a class="page-link" href="#" id="discPageInfo">1/1</a></li>
+                <li class="page-item" id="discNextPage"><a class="page-link" href="#" onclick="changeDiscPage(1)">下一页 <i class="bi bi-chevron-right"></i></a></li>
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<!-- 任务日志弹窗 -->
+<div class="modal fade" id="taskLogModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-journal-text me-2"></i>任务执行日志 - <span id="taskLogTitle">#0</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="taskLogBody" style="max-height:500px;overflow-y:auto;font-family:var(--font-mono);font-size:0.85rem">
+                <p class="text-muted">加载中...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/discovery.js?v=20260704"></script>
+{% endblock %}

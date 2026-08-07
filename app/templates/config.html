@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}评分配置 - AI Trade Customer Analyzer{% endblock %}
+{% block page_title %}<i class="bi bi-gear-wide-connected me-2"></i>评分系统配置{% endblock %}
+
+{% block top_bar_actions %}
+<button class="btn btn-sm btn-outline-primary" onclick="loadConfig()">
+    <i class="bi bi-arrow-clockwise me-1"></i>重置
+</button>
+<button class="btn btn-sm btn-accent" onclick="saveConfig()">
+    <i class="bi bi-floppy me-1"></i>保存
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="page-subtitle text-muted small mb-4">修改评分标准、行业关键词、国家权重等参数，保存后立即生效，无需重启服务</div>
+
+<div class="row">
+    <!-- 左栏 -->
+    <div class="col-lg-8">
+
+        <!-- ① 正向关键词 -->
+        <div class="card border-0 mb-4" data-animate data-delay="100">
+            <div class="card-header">
+                <i class="bi bi-plus-circle text-success"></i> 正向关键词
+                <span class="ms-auto text-muted small fw-normal">用于关键词分析，命中后参与评分</span>
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-1 mb-3" id="positiveKeywordsContainer"></div>
+                <div class="input-group input-group-sm" style="max-width:400px">
+                    <input type="text" class="form-control" id="newPositiveKeyword" placeholder="输入新关键词" onkeydown="if(event.key==='Enter')addPositiveKeyword()">
+                    <button class="btn btn-outline-success" onclick="addPositiveKeyword()"><i class="bi bi-plus-lg"></i> 添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ② 负向关键词 -->
+        <div class="card border-0 mb-4" data-animate data-delay="150">
+            <div class="card-header">
+                <i class="bi bi-dash-circle text-danger"></i> 负向关键词
+                <span class="ms-auto text-muted small fw-normal">命中后表示客户可能非目标</span>
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-1 mb-3" id="negativeKeywordsContainer"></div>
+                <div class="input-group input-group-sm" style="max-width:400px">
+                    <input type="text" class="form-control" id="newNegativeKeyword" placeholder="输入新关键词" onkeydown="if(event.key==='Enter')addNegativeKeyword()">
+                    <button class="btn btn-outline-danger" onclick="addNegativeKeyword()"><i class="bi bi-plus-lg"></i> 添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ③ 行业匹配权重 -->
+        <div class="card border-0 mb-4" data-animate data-delay="200">
+            <div class="card-header">
+                <i class="bi bi-sliders"></i> 行业匹配度评分权重
+                <span class="ms-auto text-muted small fw-normal">满分 <input type="number" id="industryMaxScore" class="form-control form-control-sm d-inline-block weight-input" onchange="markDirty()"> 分</span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">每个关键词命中后按权重加分（最高 5 分/词），总计不超过满分。</p>
+                <table class="table table-sm table-borderless mb-0" style="max-width:500px">
+                    <thead><tr><th>关键词</th><th style="width:70px">权重</th><th style="width:30px"></th></tr></thead>
+                    <tbody id="industryWeightsBody"></tbody>
+                </table>
+                <div class="input-group input-group-sm mt-2" style="max-width:350px">
+                    <input type="text" class="form-control" id="newIndustryKw" placeholder="新关键词" onkeydown="if(event.key==='Enter')addIndustryWeight()">
+                    <input type="number" class="form-control weight-input-sm" id="newIndustryWt" placeholder="权重" value="3" min="1" max="5">
+                    <button class="btn btn-outline-primary" onclick="addIndustryWeight()"><i class="bi bi-plus-lg"></i> 添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ④ 项目匹配度 -->
+        <div class="card border-0 mb-4" data-animate data-delay="250">
+            <div class="card-header">
+                <i class="bi bi-folder"></i> 项目匹配度
+                <span class="ms-auto text-muted small fw-normal">满分 <input type="number" id="projectMaxScore" class="form-control form-control-sm d-inline-block weight-input" onchange="markDirty()"> 分</span>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">检测关键词（有项目页则加分）</label>
+                        <div class="d-flex flex-wrap gap-1 mb-2" id="projectDetectionContainer"></div>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control" id="newProjectDetectKw" placeholder="如 projects" onkeydown="if(event.key==='Enter')addProjectDetectionKw()">
+                            <button class="btn btn-outline-primary" onclick="addProjectDetectionKw()"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">内容关键词（项目涉足则额外加分）</label>
+                        <div class="d-flex flex-wrap gap-1 mb-2" id="projectContentContainer"></div>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control" id="newProjectContentKw" placeholder="如 wastewater" onkeydown="if(event.key==='Enter')addProjectContentKw()">
+                            <button class="btn btn-outline-primary" onclick="addProjectContentKw()"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mt-2">
+                    <div class="col-md-3">
+                        <label class="form-label">有项目页基础分</label>
+                        <input type="number" id="projectHasProjectBase" class="form-control form-control-sm" onchange="markDirty()">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">行业内容匹配加分</label>
+                        <input type="number" id="projectHasContentMatch" class="form-control form-control-sm" onchange="markDirty()">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">低相关度加分</label>
+                        <input type="number" id="projectLowRelevance" class="form-control form-control-sm" onchange="markDirty()">
+                    </div>
+                </div>
+                <div class="row g-3 mt-2">
+                    <div class="col-md-4">
+                        <label class="form-label">有项目页提示文字</label>
+                        <input type="text" id="projectHasProjectLabel" class="form-control form-control-sm" placeholder="如：存在项目案例页面" onchange="markDirty()">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">行业内容匹配提示文字</label>
+                        <input type="text" id="projectHasContentLabel" class="form-control form-control-sm" placeholder="如：项目涉足目标行业" onchange="markDirty()">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">低相关度提示文字</label>
+                        <input type="text" id="projectLowRelevanceLabel" class="form-control form-control-sm" placeholder="如：项目与目标行业相关度低" onchange="markDirty()">
+                    </div>
+                    <div class="col-12 text-muted small mt-1">
+                        <i class="bi bi-info-circle"></i> 提示文字用于评分详情页展示
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑤ 公司类型评分 -->
+        <div class="card border-0 mb-4" data-animate data-delay="300">
+            <div class="card-header">
+                <i class="bi bi-building"></i> 公司类型评分
+                <span class="ms-auto text-muted small fw-normal">满分 <input type="number" id="companyTypeMaxScore" class="form-control form-control-sm d-inline-block weight-input" onchange="markDirty()"> 分</span>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm table-borderless mb-0" style="max-width:400px">
+                    <thead><tr><th>公司类型</th><th style="width:80px">分数</th><th style="width:30px"></th></tr></thead>
+                    <tbody id="companyTypeBody"></tbody>
+                </table>
+                <div class="input-group input-group-sm mt-2" style="max-width:350px">
+                    <input type="text" class="form-control" id="newCompanyType" placeholder="如 EPC" onkeydown="if(event.key==='Enter')addCompanyType()">
+                    <input type="number" class="form-control weight-input-sm" id="newCompanyTypeScore" placeholder="分数" value="10" min="0" max="20">
+                    <button class="btn btn-outline-primary" onclick="addCompanyType()"><i class="bi bi-plus-lg"></i> 添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑥ 联系方式评分 -->
+        <div class="card border-0 mb-4" data-animate data-delay="350">
+            <div class="card-header">
+                <i class="bi bi-envelope"></i> 联系方式评分
+                <span class="ms-auto text-muted small fw-normal">根据邮箱数量阶梯给分</span>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm table-borderless mb-0" style="max-width:400px">
+                    <thead><tr><th style="width:120px">最少邮箱数</th><th style="width:80px">得分</th><th style="width:30px"></th></tr></thead>
+                    <tbody id="contactTiersBody"></tbody>
+                </table>
+                <div class="input-group input-group-sm mt-2" style="max-width:350px">
+                    <input type="number" class="form-control" id="newTierMin" placeholder="最少邮箱数" value="0" min="0">
+                    <input type="number" class="form-control weight-input-sm" id="newTierScore" placeholder="得分" value="0" min="0" max="10">
+                    <button class="btn btn-outline-primary" onclick="addTier()"><i class="bi bi-plus-lg"></i> 添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑦ 优先级规则 -->
+        <div class="card border-0 mb-4" data-animate data-delay="400">
+            <div class="card-header"><i class="bi bi-bar-chart-steps"></i> 优先级规则</div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-3">
+                        <label class="form-label">A 级 ≥</label>
+                        <input type="number" id="priorityAMin" class="form-control form-control-sm" onchange="markDirty()">
+                    </div>
+                    <div class="col-3">
+                        <label class="form-label">B 级 ≥</label>
+                        <input type="number" id="priorityBMin" class="form-control form-control-sm" onchange="markDirty()">
+                    </div>
+                    <div class="col-3">
+                        <label class="form-label">C 级 ≥</label>
+                        <input type="number" id="priorityCMin" class="form-control form-control-sm" onchange="markDirty()">
+                    </div>
+                    <div class="col-3">
+                        <label class="form-label">D 级 ≥</label>
+                        <input type="number" id="priorityDMin" class="form-control form-control-sm" onchange="markDirty()">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 右栏 -->
+    <div class="col-lg-4">
+
+        <!-- ⑧ 国家权重 -->
+        <div class="card border-0 mb-4" data-animate data-delay="200">
+            <div class="card-header">
+                <i class="bi bi-globe2"></i> 国家权重
+                <span class="ms-auto text-muted small fw-normal">满分 <input type="number" id="countryMaxScore" class="form-control form-control-sm d-inline-block weight-input" onchange="markDirty()"> 分</span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">设置各国家的优先级分数（0=不关注，15=最高优先）</p>
+                <table class="table table-sm table-borderless mb-0">
+                    <thead><tr><th>国家</th><th style="width:60px">权重</th><th style="width:25px"></th></tr></thead>
+                    <tbody id="countryWeightsBody"></tbody>
+                </table>
+                <div class="input-group input-group-sm mt-2">
+                    <input type="text" class="form-control" id="newCountry" placeholder="国家名称" onkeydown="if(event.key==='Enter')addCountryWeight()">
+                    <input type="number" class="form-control weight-input-sm" id="newCountryWeight" placeholder="权重" value="5" min="0" max="15">
+                    <button class="btn btn-outline-primary" onclick="addCountryWeight()"><i class="bi bi-plus-lg"></i> 添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- JSON 预览 -->
+        <div class="card border-0 mb-4" data-animate data-delay="300">
+            <div class="card-header d-flex justify-content-between">
+                <span><i class="bi bi-code-slash"></i> JSON 预览</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="toggleJsonPreview()"><i class="bi bi-eye me-1"></i>查看</button>
+            </div>
+            <div class="card-body d-none" id="jsonPreviewBody">
+                <p class="text-muted small">industry_config.json 完整内容</p>
+                <div class="json-preview" id="jsonPreviewContent"></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- 底部保存栏 -->
+<div class="card border-0 mb-4" data-animate>
+    <div class="save-bar">
+        <span class="text-muted small"><i class="bi bi-info-circle me-1"></i>保存后自动清除缓存，后续分析将使用新规则。已有客户不会重新评分。</span>
+        <button class="btn btn-accent px-4" onclick="saveConfig()"><i class="bi bi-floppy me-1"></i>保存全部配置</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/config.js"></script>
+{% endblock %}
