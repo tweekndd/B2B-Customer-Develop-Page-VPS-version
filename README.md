@@ -48,6 +48,7 @@
 | **GLM AI 分析** | 识别公司类型、分析原因、生成开发切入点和推荐联系职位，支持模型自动降级 |
 | **买家/供应商分级 V4.6** | AI 买家意向评分(0-10)：供应商/制造商=低分，矿场/EPC/政府招标=高分，经销商/贸易商=高价值采购方（7-9） |
 | **多语种开发信 V4.6** | 产品关键词驱动的 AI 开发信自动生成，按国家自动检测语言（130+ 国家），一键复制/打开邮件客户端 |
+| **AI 与 API 设置页 V4.6** | 网页上配置 LLM/搜索引擎/邮箱 API Key（无需环境变量），多 Provider 支持 + 测试连接，Key 加密存储、按用户隔离、自动回退服务器默认 |
 | **规则评分引擎** | 5 个维度评分：行业匹配度(30) + 项目匹配度(25) + 公司类型(20) + 国家优先级(15) + 联系方式(10) + 价格询盘加成(5)，可运行时配置 |
 | **Hunter 邮箱查找** | Hunter.io API，支持域名搜索、姓名精确查找、部门/级别筛选，5 层配额优化策略 |
 | **Tomba 邮箱查找** | Tomba.io API，返回数据更丰富（含领英、电话、部门、置信度评分），无结果不扣费 |
@@ -97,12 +98,14 @@ pip install -r requirements.txt
 | **Tomba.io** | 邮箱查找（可选） | 免费层 25次/月 | https://tomba.io/ |
 | **Prospeo.io** | 邮箱查找（可选） | 免费层积分制 | https://prospeo.io/ |
 
-> **零成本运行方案**：只需配置 `GLM_API_KEY`（免费）+ SearXNG 自托管（免费）→ 零 API 费用。
+> **零成本运行方案**：只需配置 GLM API（免费）+ SearXNG 自托管（免费）→ 零 API 费用。
 > 旧 `DEEPSEEK_API_KEY` 环境变量自动兼容。
 
-### 3. 配置环境变量并启动
+> 💡 **API Key 无需配置环境变量**：登录后导航栏 → **「AI 与 API 设置」** 页面，即可在网页上填写你的 LLM / 搜索引擎 / 邮箱服务 Key。每个用户独立保存（Fernet 加密、仅自己可见、页面只显示后 4 位），未配置的服务自动回退服务器环境变量。也支持运行时「测试连接」与切换 Provider（GLM / DeepSeek / Qwen / Moonshot / OpenAI / 自定义兼容接口）。
 
-选择合适的终端，按你的操作系统设置环境变量后启动：
+### 3. 启动系统
+
+只需设置管理员账号（其余 Key 均可登录后在设置页配置）：
 
 <details open>
 <summary><b>🐚 Linux / macOS (bash/zsh)</b></summary>
@@ -110,16 +113,8 @@ pip install -r requirements.txt
 ```bash
 export ADMIN_USERNAME=admin
 export ADMIN_PASSWORD=your-secure-password
-export GLM_API_KEY=your-glm-api-key
-# 可选搜索引擎 Key（不设则自动检测 SearXNG / Tavily / SerpAPI）
-export SEARXNG_URL=http://127.0.0.1:8888
-# 或 export TAVILY_API_KEY=tvly-xxx
-# 或 export SERPAPI_API_KEY=xxx
-# 可选邮箱查找
-export HUNTER_API_KEY=your-hunter-key
-export TOMBA_API_KEY=ta-your-tomba-key
-export TOMBA_API_SECRET=ts-your-tomba-secret
-export PROSPEO_API_KEY=your-prospeo-key
+# 其余 API Key（GLM / Tavily / SerpAPI / Hunter / Tomba / Prospeo）
+# 均可登录后到「AI 与 API 设置」页面填写，无需在此配置
 
 python main.py
 ```
@@ -133,14 +128,7 @@ python main.py
 ```cmd
 set ADMIN_USERNAME=admin
 set ADMIN_PASSWORD=your-secure-password
-set GLM_API_KEY=your-glm-api-key
-set SEARXNG_URL=http://127.0.0.1:8888
-set TAVILY_API_KEY=tvly-xxx
-set SERPAPI_API_KEY=xxx
-set HUNTER_API_KEY=your-hunter-key
-set TOMBA_API_KEY=ta-your-tomba-key
-set TOMBA_API_SECRET=ts-your-tomba-secret
-set PROSPEO_API_KEY=your-prospeo-key
+REM 其余 API Key 登录后到「AI 与 API 设置」页面填写即可
 
 python main.py
 ```
@@ -155,14 +143,7 @@ python main.py
 ```powershell
 $env:ADMIN_USERNAME="admin"
 $env:ADMIN_PASSWORD="your-secure-password"
-$env:GLM_API_KEY="your-glm-api-key"
-$env:SEARXNG_URL="http://127.0.0.1:8888"
-$env:TAVILY_API_KEY="tvly-xxx"
-$env:SERPAPI_API_KEY="xxx"
-$env:HUNTER_API_KEY="your-hunter-key"
-$env:TOMBA_API_KEY="ta-your-tomba-key"
-$env:TOMBA_API_SECRET="ts-your-tomba-secret"
-$env:PROSPEO_API_KEY="your-prospeo-key"
+# 其余 API Key 登录后到「AI 与 API 设置」页面填写即可
 
 python main.py
 ```
@@ -178,10 +159,6 @@ python main.py
 # Git Bash 中使用 export（与 Linux 语法一致）
 export ADMIN_USERNAME=admin
 export ADMIN_PASSWORD=your-secure-password
-export GLM_API_KEY=your-glm-api-key
-export SEARXNG_URL=http://127.0.0.1:8888
-export TAVILY_API_KEY=tvly-xxx
-export SERPAPI_API_KEY=xxx
 
 python main.py
 ```
@@ -198,13 +175,20 @@ cp .env.example .env
 # 然后用记事本/VSCode 编辑 .env 文件
 ```
 
-系统启动时自动读取 `.env` 文件中的配置。支持所有平台（Windows / macOS / Linux）。
+> `.env` 中的 Key 作为**服务器全局默认**（所有用户回退值）。仅需管理员账号时也可完全跳过，登录后由各用户在设置页配置自己的 Key。
 
 ### 5. 访问系统
 
 启动成功后，浏览器打开 **http://localhost:8000** → 自动跳转登录页，使用管理员账号登录。
 
-### 6. 完整环境变量表
+登录后建议先进入 **「AI 与 API 设置」** 页配置：
+- **AI 模型（LLM）**：选择 Provider、填 Key、设默认模型与备用降级模型 → 保存后可「测试连接」
+- **邮箱查找服务**：Hunter / Tomba / Prospeo 三选一或全配（瀑布式发现）
+- **搜索引擎**：Tavily / SerpAPI / SearXNG，并设置首选引擎
+
+配置完成后即可在「客户发现」页开始搜索客户。
+
+### 6. 完整环境变量表（服务器全局默认值）
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -229,6 +213,8 @@ cp .env.example .env
 | `SCRAPE_VERIFY_SSL` | `false` | 爬虫是否验证 SSL 证书 |
 
 > **搜索引擎选择说明**：支持 SearXNG/SerpAPI/Tavily 三种后端。启动时自动检测：优先 SearXNG（有 `SEARXNG_URL`）→ 其次 Tavily → 最后 SerpAPI。运行时可通过客户发现页面一键切换，无需重启。
+>
+> **这些环境变量均为「服务器全局默认值」**：各用户可登录后在 **「AI 与 API 设置」** 页面配置自己的 Key（优先），未配置时自动回退到以下环境变量。多用户共用服务器时，建议只在设置页让每个用户填自己的 Key，避免共享账号配额。
 >
 > **Windows 环境变量注意事项**：
 > - **CMD**：使用 `set KEY=value`，等号两边**不能有空格**
@@ -267,6 +253,24 @@ cp .env.example .env
 - 评分明细 · 提取邮箱 · 关键词分析 · AI 分析结果 · 开发建议 · 官网原文
 - 瀑布式邮箱发现（多源级联查找）
 - 跟进状态管理 + 客户评级
+- **买家意向徽章**：AI 给出买家意向评分（0-10），供应商/制造商=低分，矿场/EPC/经销商/贸易商=高分，高意向客户标注「🔥 询价」
+
+#### AI 写开发信（V4.6）
+
+详情页 → 「AI 开发信生成」卡片：
+1. 选择语言（默认按客户国家自动检测，支持 130+ 国家，如墨西哥 → 西班牙语）
+2. 填写产品关键词（留空则自动从客户 AI 分析中提取）
+3. 点击 **生成开发信** → AI 输出 Subject + Body，可一键**复制**或**打开邮件客户端**
+
+> 系统会记住最近一次生成的草稿，刷新页面后仍保留，方便对照修改后手动发送。
+
+### AI 与 API 设置页（V4.6）
+
+导航栏 → **AI 与 API 设置**（需登录）：
+- **AI 模型**：选择 Provider（GLM / DeepSeek / Qwen / Moonshot / OpenAI / 自定义兼容接口）、填 API Key、设置默认模型与备用降级模型，支持「测试连接」
+- **邮箱服务**：Hunter / Tomba / Prospeo 的 Key 配置
+- **搜索引擎**：Tavily / SerpAPI / SearXNG 的 Key 或 URL，并设置首选引擎
+- Key **加密存储**（Fernet），仅本人可见，页面只显示后 4 位；未配置的服务自动回退服务器环境变量
 
 ### 客户地理分布地图
 
@@ -505,18 +509,21 @@ AI-Trade-Customer-Analyzer/
 ├── searxng/
 │   └── settings.yml                  # SearXNG 配置
 ├── app/
-│   ├── database.py                   # 11 张数据表
+│   ├── database.py                   # 12 张数据表
 │   ├── auth.py                       # 认证与权限 (V4.6)
 │   ├── api/
-│   │   ├── customers.py              # 客户 CRUD / 分析 / 导入导出
+│   │   ├── customers.py              # 客户 CRUD / 分析 / 导入导出 / 开发信
 │   │   ├── discovery.py              # 搜索任务 / 关键词扩展 / 相似客户
 │   │   ├── sync.py                   # 数据同步 / 备份恢复
 │   │   ├── config.py                 # 评分系统配置
+│   │   ├── user_config.py            # 用户级 API Key 配置（V4.6）
 │   │   ├── hunter.py / tomba.py / waterfall.py  # 邮箱查找
 │   │   ├── users.py                  # 用户管理
 │   │   └── geocode.py                # 地理编码
 │   ├── services/
-│   │   ├── glm_analyzer.py           # GLM AI 分析（含模型降级）
+│   │   ├── glm_analyzer.py           # GLM AI 分析（含模型降级 + 买家意向评分）
+│   │   ├── email_composer.py         # AI 开发信生成（V4.6，多语种）
+│   │   ├── user_config.py            # 用户级 API Key 服务层（加密存储）
 │   │   ├── google_discovery.py       # 搜索引擎（运行时切换）
 │   │   ├── searxng_discovery.py      # SearXNG 搜索客户端
 │   │   ├── website_scraper.py        # 官网抓取 V2
@@ -530,16 +537,17 @@ AI-Trade-Customer-Analyzer/
 │   │   ├── cache_manager.py          # 缓存管理
 │   │   ├── deduplication.py          # 智能去重
 │   │   └── ...                       # 更多服务
-│   ├── llm/                           # 🆕 LLM 统一架构 (V5.0)
+│   ├── llm/                           # LLM 统一架构 (V5.0)
 │   │   ├── manager.py                 # 统一入口（Provider 工厂 + 配置解析）
 │   │   ├── router.py                  # 自动 Fallback + 重试
-│   │   ├── config.py                  # 配置解析（环境变量 / Round 3 用户配置）
+│   │   ├── config.py                  # 配置解析（环境变量 / 用户配置）
 │   │   ├── exceptions.py / utils.py   # 统一异常体系 / JSON 提取
 │   │   └── providers/
 │   │       ├── glm.py                 # 智谱 GLM Provider
-│   │       └── openai_compatible.py   # OpenAI 兼容 Provider
-│   ├── static/js/                    # 8 个 JS 模块
-│   └── templates/                    # HTML 模板
+│   │       └── openai_compatible.py   # OpenAI 兼容 Provider（DeepSeek/Qwen/Moonshot/自定义）
+│   ├── static/js/                    # JS 模块（含 settings.js 设置页）
+│   ├── templates/                    # HTML 模板（含 settings.html / filemanager.html）
+│   └── filemanager.py                # VPS 文件管理器（仅管理员）
 └── tests/                            # 234 个测试用例
 ```
 
@@ -560,6 +568,9 @@ AI-Trade-Customer-Analyzer/
 | `email_quota_log` | 邮箱发现配额日志 |
 | `geocode_cache` | 地理编码缓存（唯一键 + 命中计数） |
 | `users` | 用户表（密码哈希 / 角色 / 权限 / 配额） |
+| `user_api_config` | 用户级 API Key（LLM/搜索/邮箱，Fernet 加密存储） |
+
+> **用户级 API Key**：`user_api_config` 表按「用户 + 服务」唯一存储各用户自己的 Key，加密密钥来自 `API_CONFIG_ENCRYPTION_KEY` 环境变量（未设置时自动生成并持久化到 `app/.config_encryption_key`，该文件已被 gitignore）。
 
 ---
 
@@ -571,11 +582,14 @@ AI-Trade-Customer-Analyzer/
 |------|------|------|
 | 行业匹配度 | 30 | 官网命中行业关键词的数量和权重（可运行时编辑） |
 | 项目匹配度 | 25 | 是否有项目案例页面、是否涉足目标行业（标签可配置） |
-| 公司类型 | 20 | EPC=20, Contractor=18, 生产商=12...（可编辑） |
+| 公司类型 | 20 | EPC=20, Contractor=18, Distributor=18, Dealer=17, Importer/Trader/End User/Mining=16-17, 生产商=8...（可编辑） |
+| 价格询盘加成 | +5 | 客户官网含采购询价意向时额外加分（`scoring.price_inquiry`，可编辑），总分封顶 100 |
 | 国家优先级 | 15 | 从 `country_weights.json` 读取（可编辑） |
 | 联系方式 | 10 | 1个=3分, 2个=5分, 3个=8分, 4个+=10分 |
 
 **优先级**：A(80-100) / B(60-79) / C(40-59) / D(0-39)
+
+**买家意向评分（V4.6）**：AI 同步输出 0-10 分（存于 `buyer_intent_score`，不并入总分）——供应商/制造商/电商页=低分，矿场/EPC/政府招标=高分，经销商/分销商/贸易商=高价值采购方（7-9 分），并标记 `is_price_inquiry`（价格询盘）。详情页与列表页以徽章展示。
 
 评分规则通过网页 **「评分配置」** 页面或编辑 `app/services/industry_config.json` 调整。切换行业（如水处理 → 光伏）仅需修改配置，无需改代码。
 
