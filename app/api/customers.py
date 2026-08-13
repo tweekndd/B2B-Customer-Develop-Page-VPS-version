@@ -6,6 +6,7 @@
 import json
 import datetime
 import os
+import uuid
 from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
@@ -21,7 +22,9 @@ from app.services.glm_analyzer import analyze_company, generate_summary, get_buy
 from app.services.scoring_engine import calculate_scores
 from app.services.email_composer import generate_email_draft, load_email_draft
 from app.services.search_task_service import request_stop
-from app.auth import check_ai_analysis_permission
+from app.services.customer_email_service import bulk_upsert_customer_emails, upsert_customer_email, get_customer_emails
+from app.services.linkedin_service import get_verified_linkedin_url
+from app.auth import check_ai_analysis_permission, require_user
 
 router = APIRouter(tags=["customers"])
 
@@ -136,7 +139,7 @@ def list_customers(
     }
 
 
-@router.get("/customers/{customer_id}")
+@router.get("/customers/{customer_id:int}")
 def get_customer_detail(customer_id: int, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
@@ -172,12 +175,37 @@ def get_customer_detail(customer_id: int, db: Session = Depends(get_db)):
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # V5.1：结构化邮箱记录（新表事实源）
+    email_records = []
+    for r in get_customer_emails(db, customer.id):
+        email_records.append({
+            "id": r.id,
+            "email": r.email,
+            "local_part": r.local_part,
+            "domain": r.domain,
+            "source": r.source or "manual",
+            "source_detail": r.source_detail,
+            "first_name": r.first_name or "",
+            "last_name": r.last_name or "",
+            "position": r.position or "",
+            "department": r.department or "",
+            "phone": r.phone or "",
+            "linkedin": r.linkedin or "",
+            "score": r.score or 0,
+            "verification": r.verification or "unknown",
+            "notes": r.notes or "",
+            "is_primary": bool(r.is_primary),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        })
+
     return {
         "id": customer.id,
         "company_name": customer.company_name,
         "website": customer.website or "",
         "country": customer.country or "",
         "emails": emails,
+        "email_records": email_records,
         "website_text": customer.website_text or "",
         "positive_keywords": positive_kw,
         "negative_keywords": negative_kw,
@@ -222,11 +250,16 @@ def get_customer_detail(customer_id: int, db: Session = Depends(get_db)):
 # ═══════════════════════════════════════════
 
 @router.post("/import-excel")
-async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="请上传 .xlsx 或 .xls 格式的Excel文件")
     os.makedirs("app/uploads", exist_ok=True)
-    upload_path = f"app/uploads/{file.filename}"
+    safe_name = f"{uuid.uuid4().hex}_{os.path.basename(file.filename)}"
+    upload_path = os.path.join("app/uploads", safe_name)
     content = await file.read()
     with open(upload_path, "wb") as f:
         f.write(content)
@@ -265,7 +298,7 @@ async def analyze_single(
             customer.website_text = website_text
             emails = extract_emails_from_text(website_text)
             email_list = list(set(emails))
-            customer.emails = json.dumps(email_list, ensure_ascii=False)
+            bulk_upsert_customer_emails(db, customer.id, email_list, source="website")
             pos_hits, neg_hits = analyze_keywords(website_text)
             customer.positive_keywords = json.dumps(pos_hits, ensure_ascii=False)
             customer.negative_keywords = json.dumps(neg_hits, ensure_ascii=False)
@@ -289,9 +322,11 @@ async def analyze_single(
             else:
                 customer.ai_status = "failed"
                 customer.fail_reason = "AI分析失败（API可能超时）"
+            # V5.1：评分使用合并后的全量邮箱（含历史手动/发现邮箱）
+            merged_emails = _get_emails_list(customer)
             scores = calculate_scores(
                 website_text=website_text, positive_keywords=pos_hits,
-                company_type=customer.company_type, country=customer.country, emails=email_list,
+                company_type=customer.company_type, country=customer.country, emails=merged_emails,
                 is_price_inquiry=customer.is_price_inquiry == 1,
                 buyer_intent_score=customer.buyer_intent_score,
             )
@@ -354,7 +389,10 @@ def get_analysis_status():
 # ═══════════════════════════════════════════
 
 @router.get("/export-excel")
-def export_excel(db: Session = Depends(get_db)):
+def export_excel(
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     """导出客户列表为 Excel，按以下规则生成列：
        A-Country | B-Company Name | C-二次开发 | D-邮箱 | E-电话 | F-备注 | G-Website | H-领英"""
     import openpyxl
@@ -411,7 +449,7 @@ def export_excel(db: Session = Depends(get_db)):
             "",                                        # E: 电话（暂无数据，可空）
             c.notes or "",                             # F: 备注（可空）
             c.website or "",                           # G: Website
-            "",                                        # H: 领英（暂无数据，可空）
+            get_verified_linkedin_url(db, c.id) or "", # H: 领英（V5.1：已确认主页）
             c.status or "待联系",                       # I: 跟进状态
             c.total_score if c.total_score is not None else "",  # J: AI评分
         ]
@@ -442,8 +480,12 @@ def export_excel(db: Session = Depends(get_db)):
 # 客户删除 & 批量删除 & 统计
 # ═══════════════════════════════════════════
 
-@router.delete("/customers/{customer_id}")
-def delete_customer(customer_id: int, db: Session = Depends(get_db)):
+@router.delete("/customers/{customer_id:int}")
+def delete_customer(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="客户不存在")
@@ -455,6 +497,7 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db)):
 def batch_delete_customers(
     ids: str = Query(..., description="要删除的客户ID列表，JSON数组字符串"),
     db: Session = Depends(get_db),
+    user=Depends(require_user),
 ):
     """批量删除客户（支持全选/多选后统一删除）"""
     try:
@@ -513,9 +556,13 @@ def add_customer_emails(
     customer_id: int,
     emails: str = Query(..., description="要添加的邮箱列表，JSON 数组字符串"),
     set_status: Optional[str] = Query(None, description="同时设置跟进状态"),
+    source: Optional[str] = Query(None, description="邮箱来源: hunter/tomba/prospeo/scraped/manual"),
     db: Session = Depends(get_db),
 ):
-    """将 Hunter 查到的邮箱保存到客户记录，可选同时更新跟进状态"""
+    """将 Hunter/Tomba/瀑布/官网等查到的邮箱保存到客户记录，可选同时更新跟进状态
+
+    V5.1：统一写入 CustomerEmail 表（source 缺省时按原行为写入兼容 JSON 字段）
+    """
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="客户不存在")
@@ -527,10 +574,23 @@ def add_customer_emails(
     except (json.JSONDecodeError, ValueError):
         raise HTTPException(status_code=400, detail="emails 参数应为 JSON 数组字符串")
 
-    # 合并去重
-    existing = _get_emails_list(customer)
-    merged = list(dict.fromkeys(existing + new_emails))  # 去重保序
-    customer.emails = json.dumps(merged, ensure_ascii=False)
+    valid_sources = {"website", "hunter", "tomba", "prospeo", "manual", "legacy"}
+    if source and source not in valid_sources:
+        raise HTTPException(status_code=400, detail=f"无效来源，可选: {', '.join(sorted(valid_sources))}")
+
+    if source:
+        # V5.1：走统一表写入（同时保持 JSON 视图同步）
+        for raw in new_emails:
+            try:
+                upsert_customer_email(db, customer.id, raw, source=source)
+            except ValueError:
+                continue
+    else:
+        # 旧行为：JSON 合并去重（兼容未带 source 的调用方）
+        existing = _get_emails_list(customer)
+        merged = list(dict.fromkeys(existing + new_emails))  # 去重保序
+        customer.emails = json.dumps(merged, ensure_ascii=False)
+
     customer.updated_at = datetime.datetime.utcnow()
 
     # 可选更新跟进状态
@@ -540,6 +600,7 @@ def add_customer_emails(
             customer.status = set_status
 
     db.commit()
+    merged = _get_emails_list(customer)
     return {
         "message": f"已添加 {len(new_emails)} 个邮箱，共 {len(merged)} 个",
         "customer_id": customer.id,
@@ -612,18 +673,19 @@ async def rescrape_customer(customer_id: int, db: Session = Depends(get_db)):
         if website_text:
             customer.scrape_status = "success"
             customer.website_text = website_text
-            # 重新提取邮箱
+            # 重新提取邮箱（增量合并到新表，不覆盖）
             emails = extract_emails_from_text(website_text)
             email_list = list(set(emails))
-            customer.emails = json.dumps(email_list, ensure_ascii=False)
+            bulk_upsert_customer_emails(db, customer.id, email_list, source="website")
             # 重新关键词分析
             pos_hits, neg_hits = analyze_keywords(website_text)
             customer.positive_keywords = json.dumps(pos_hits, ensure_ascii=False)
             customer.negative_keywords = json.dumps(neg_hits, ensure_ascii=False)
-            # 重新评分
+            # 重新评分（使用合并后的全量邮箱）
+            merged_emails = _get_emails_list(customer)
             scores = calculate_scores(
                 website_text=website_text, positive_keywords=pos_hits,
-                company_type=customer.company_type, country=customer.country, emails=email_list,
+                company_type=customer.company_type, country=customer.country, emails=merged_emails,
             )
             customer.industry_score = scores["industry_score"]
             customer.project_score = scores["project_score"]

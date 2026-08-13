@@ -146,20 +146,12 @@ function renderDetail(c) {
         }
     }
 
-    const ec = document.getElementById('emailsContainer');
-    if (c.emails && c.emails.length > 0) {
-        ec.innerHTML = '<div class="d-flex flex-wrap gap-2 mb-2">' +
-            c.emails.map(e => `<span class="email-badge"><i class="bi bi-envelope-fill"></i> ${_esc(e)}</span>`).join('') +
-            '</div>';
-        if (c.website) {
-            ec.innerHTML += `<div class="mt-1"><button class="btn btn-sm btn-outline-info" onclick="document.getElementById('hunterTab').click()"><i class="bi bi-envelope-at me-1"></i>Hunter 查更多</button></div>`;
-        }
+    const records = c.email_records || [];
+    const legacyCount = (c.emails || []).length;
+    if (records.length === 0 && legacyCount > 0) {
+        renderLegacyEmailHint(legacyCount);
     } else {
-        let html = '<p class="text-muted small mb-2">暂未提取到邮箱</p>';
-        if (c.website) {
-            html += `<button class="btn btn-sm btn-outline-info" onclick="document.getElementById('hunterTab').click()"><i class="bi bi-envelope-at me-1"></i>通过 Hunter 查找</button>`;
-        }
-        ec.innerHTML = html;
+        renderCustomerEmails(records);
     }
 
     const kc = document.getElementById('keywordsContainer');
@@ -251,6 +243,380 @@ function renderDetail(c) {
     if (statusIcons) {
         const container = document.getElementById('discoverySourceBadge');
         container.insertAdjacentHTML('afterend', statusIcons);
+    }
+}
+
+// ── 邮箱联系人管理（V5.1） ──
+let _customerEmailRecords = [];
+
+const EMAIL_SOURCE_LABELS = {
+    website: '官网', hunter: 'Hunter', tomba: 'Tomba', prospeo: 'Prospeo',
+    manual: '手动', legacy: '旧数据', migrated: '迁移',
+};
+
+function emailSourceLabel(source) {
+    return EMAIL_SOURCE_LABELS[source] || source || '未知';
+}
+
+function emailAddForm() {
+    return `
+        <hr class="my-2">
+        <form class="row g-2 align-items-center" onsubmit="addCustomerEmail(event)">
+            <div class="col-12 col-sm">
+                <input type="email" class="form-control form-control-sm" id="newEmailInput" placeholder="输入邮箱地址" required>
+            </div>
+            <div class="col-12 col-sm">
+                <input type="text" class="form-control form-control-sm" id="newEmailNotes" placeholder="备注（可选）">
+            </div>
+            <div class="col-auto">
+                <div class="form-check form-check-inline mb-0">
+                    <input class="form-check-input" type="checkbox" id="newEmailPrimary">
+                    <label class="form-check-label small" for="newEmailPrimary">设为主要</label>
+                </div>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-accent"><i class="bi bi-plus-lg me-1"></i>添加邮箱</button>
+            </div>
+        </form>`;
+}
+
+function renderCustomerEmails(records) {
+    _customerEmailRecords = Array.isArray(records) ? records : [];
+    const ec = document.getElementById('emailsContainer');
+    const mergeBtn = document.getElementById('btnMergeLegacy');
+
+    if (_customerEmailRecords.length === 0) {
+        let html = '<p class="text-muted small mb-2">暂未提取到邮箱</p>';
+        const website = (document.getElementById('website').textContent || '').trim();
+        if (website && website !== '-') {
+            html += `<button class="btn btn-sm btn-outline-info mb-2" onclick="document.getElementById('hunterTab').click()"><i class="bi bi-envelope-at me-1"></i>查找邮箱</button>`;
+        }
+        ec.innerHTML = html + emailAddForm();
+        if (mergeBtn) mergeBtn.style.display = 'none';
+        return;
+    }
+
+    const rows = _customerEmailRecords.map(r => {
+        const vBadge = r.verification === 'valid' ? 'success' : r.verification === 'invalid' ? 'danger' : r.verification === 'risky' ? 'warning text-dark' : 'secondary';
+        const vLabel = r.verification === 'valid' ? '已验证' : r.verification === 'invalid' ? '无效' : r.verification === 'risky' ? '风险' : '未知';
+        const primaryStar = r.is_primary
+            ? '<span class="text-warning" title="主要邮箱"><i class="bi bi-star-fill"></i></span>'
+            : `<a href="#" class="text-muted text-decoration-none" title="设为主要邮箱" onclick="event.preventDefault(); setPrimaryEmail(${r.id})"><i class="bi bi-star"></i></a>`;
+        const contactInfo = [r.first_name, r.last_name].filter(Boolean).join(' ')
+            + (r.position ? (r.position ? ' · ' + r.position : '') : '')
+            + (r.department ? ' · ' + r.department : '');
+        return `
+        <div class="email-record ${r.is_primary ? 'email-primary' : ''}">
+            <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="email-badge"><i class="bi bi-envelope-fill"></i> ${_esc(r.email)}</span>
+                        ${primaryStar}
+                    </div>
+                    <div class="small text-muted mt-1">
+                        <span class="badge badge-source ${r.source}" style="font-size:0.7rem">${emailSourceLabel(r.source)}</span>
+                        <span class="badge bg-${vBadge}" style="font-size:0.7rem">${vLabel}</span>
+                        ${r.score ? `<span class="badge bg-secondary" style="font-size:0.7rem">${r.score}分</span>` : ''}
+                        ${contactInfo ? `<span class="ms-1">${_esc(contactInfo)}</span>` : ''}
+                        ${r.notes ? `<span class="ms-1"><i class="bi bi-chat-left-text"></i> ${_esc(r.notes)}</span>` : ''}
+                    </div>
+                </div>
+                <div class="d-flex gap-1 flex-shrink-0">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="_copyText('${_esc(r.email)}')" title="复制邮箱"><i class="bi bi-clipboard"></i></button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="editCustomerEmail(${r.id})" title="编辑"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomerEmail(${r.id})" title="删除"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    ec.innerHTML = `
+        <div class="mb-3">
+            ${rows}
+        </div>
+        ${emailAddForm()}`;
+
+    const website = (document.getElementById('website').textContent || '').trim();
+    if (mergeBtn) {
+        mergeBtn.style.display = website && website !== '-' ? 'inline-block' : 'none';
+    }
+}
+
+function renderLegacyEmailHint(count) {
+    _customerEmailRecords = [];
+    const ec = document.getElementById('emailsContainer');
+    const mergeBtn = document.getElementById('btnMergeLegacy');
+    ec.innerHTML = `
+        <div class="alert alert-warning py-2 px-3 mb-2 small">
+            <i class="bi bi-exclamation-triangle me-1"></i>检测到 <strong>${count}</strong> 个旧版邮箱尚未合并到新邮箱表。
+            <button class="btn btn-sm btn-warning ms-2" onclick="mergeLegacyEmails()"><i class="bi bi-arrow-repeat me-1"></i>立即合并</button>
+        </div>
+        ${emailAddForm()}`;
+    if (mergeBtn) mergeBtn.style.display = 'inline-block';
+}
+
+async function loadCustomerEmails() {
+    try {
+        const data = await _fetchWithTimeout(`/api/customers/${customerId}/emails`);
+        renderCustomerEmails(data.emails || []);
+    } catch (err) {
+        console.error('加载邮箱失败:', err);
+    }
+}
+
+async function addCustomerEmail(e) {
+    e.preventDefault();
+    const email = document.getElementById('newEmailInput').value.trim();
+    const notes = document.getElementById('newEmailNotes').value.trim();
+    const is_primary = document.getElementById('newEmailPrimary').checked;
+    if (!email) return;
+    try {
+        await _fetchWithTimeout(`/api/customers/${customerId}/emails`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, notes, is_primary }),
+        });
+        document.getElementById('newEmailInput').value = '';
+        document.getElementById('newEmailNotes').value = '';
+        document.getElementById('newEmailPrimary').checked = false;
+        showToast('邮箱已添加', 'success');
+        await loadCustomerEmails();
+    } catch (err) {
+        showToast('添加失败: ' + err.message, 'danger');
+    }
+}
+
+async function setPrimaryEmail(id) {
+    try {
+        await _fetchWithTimeout(`/api/customer-emails/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_primary: true }),
+        });
+        showToast('已设为主要邮箱', 'success');
+        await loadCustomerEmails();
+    } catch (err) {
+        showToast('操作失败: ' + err.message, 'danger');
+    }
+}
+
+async function editCustomerEmail(id) {
+    const record = _customerEmailRecords.find(r => r.id === id);
+    if (!record) return;
+    const newEmail = prompt('邮箱地址', record.email);
+    if (newEmail === null) return;
+    const newNotes = prompt('备注（留空保持不变）', record.notes || '');
+    if (newNotes === null) return;
+    const body = { email: newEmail.trim(), notes: newNotes };
+    try {
+        await _fetchWithTimeout(`/api/customer-emails/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        showToast('邮箱已更新', 'success');
+        await loadCustomerEmails();
+    } catch (err) {
+        showToast('更新失败: ' + err.message, 'danger');
+    }
+}
+
+async function deleteCustomerEmail(id) {
+    const record = _customerEmailRecords.find(r => r.id === id);
+    if (!record) return;
+    if (!confirm(`确定删除邮箱 ${record.email} 吗？`)) return;
+    try {
+        await _fetchWithTimeout(`/api/customer-emails/${id}`, { method: 'DELETE' });
+        showToast('邮箱已删除', 'success');
+        await loadCustomerEmails();
+    } catch (err) {
+        showToast('删除失败: ' + err.message, 'danger');
+    }
+}
+
+async function mergeLegacyEmails() {
+    if (!confirm('把旧版 JSON 邮箱字段合并到新邮箱表？此操作幂等，可重复执行。')) return;
+    try {
+        const data = await _fetchWithTimeout(`/api/customers/${customerId}/emails/merge-legacy`, { method: 'POST' });
+        showToast(`已合并 ${data.merged} 个旧邮箱`, 'success');
+        await loadCustomerEmails();
+    } catch (err) {
+        showToast('合并失败: ' + err.message, 'danger');
+    }
+}
+
+// ── LinkedIn 公司主页（V5.1） ──
+let _linkedinProfiles = [];
+let _linkedinOauthAuthorized = false;
+
+const LINKEDIN_SOURCE_LABELS = { search: '搜索发现', manual: '手动添加', official_api: '官方 API' };
+
+function linkedinSourceLabel(source) {
+    return LINKEDIN_SOURCE_LABELS[source] || source || '未知';
+}
+
+async function loadLinkedinProfiles() {
+    try {
+        const data = await _fetchWithTimeout(`/api/customers/${customerId}/social-profiles`);
+        renderLinkedinProfiles(data.profiles || []);
+    } catch (err) {
+        console.error('加载 LinkedIn 失败:', err);
+    }
+    try {
+        const status = await _fetchWithTimeout('/api/linkedin/oauth/status');
+        _linkedinOauthAuthorized = !!status.authorized;
+        // 已授权时重新渲染以显示「官方 API 刷新」按钮
+        if (_linkedinOauthAuthorized && document.getElementById('linkedinContainer')) {
+            renderLinkedinProfiles(_linkedinProfiles);
+        }
+    } catch (err) {
+        _linkedinOauthAuthorized = false;
+    }
+}
+
+function renderLinkedinProfiles(profiles) {
+    _linkedinProfiles = Array.isArray(profiles) ? profiles : [];
+    const lc = document.getElementById('linkedinContainer');
+    if (!lc) return;
+
+    if (_linkedinProfiles.length === 0) {
+        lc.innerHTML = `
+            <p class="text-muted small mb-2">暂未保存 LinkedIn 公司主页</p>
+            <button class="btn btn-sm btn-outline-primary mb-2" onclick="discoverLinkedin()"><i class="bi bi-search me-1"></i>通过搜索引擎查找</button>
+            <form class="row g-2 align-items-center mt-1" onsubmit="addLinkedinProfile(event)">
+                <div class="col-12 col-sm">
+                    <input type="url" class="form-control form-control-sm" id="newLinkedinUrl" placeholder="粘贴 LinkedIn 公司页 URL" required>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-accent"><i class="bi bi-plus-lg me-1"></i>手动添加</button>
+                </div>
+            </form>`;
+        return;
+    }
+
+    const rows = _linkedinProfiles.map(p => {
+        const verifiedBadge = p.is_verified
+            ? '<span class="badge bg-success" style="font-size:0.7rem"><i class="bi bi-check-circle me-1"></i>已确认</span>'
+            : `<button class="btn btn-sm btn-outline-success" onclick="verifyLinkedinProfile(${p.id}, true)" title="确认此主页为公司主页"><i class="bi bi-check-lg me-1"></i>确认</button>`;
+        const confPct = Math.round(p.confidence || 0);
+        return `
+        <div class="email-record ${p.is_verified ? 'email-primary' : ''}">
+            <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <a href="${_esc(p.profile_url)}" target="_blank" rel="noopener" class="text-decoration-none">
+                            <span class="email-badge"><i class="bi bi-linkedin"></i> ${_esc(p.display_name || p.vanity_name || p.profile_url)}</span>
+                        </a>
+                        ${verifiedBadge}
+                    </div>
+                    <div class="small text-muted mt-1">
+                        <span class="badge bg-secondary" style="font-size:0.7rem">${linkedinSourceLabel(p.source)}</span>
+                        ${confPct > 0 ? `<span class="badge bg-info text-dark" style="font-size:0.7rem">置信度 ${confPct}%</span>` : ''}
+                        ${p.website_url ? `<span class="ms-1">官网: ${_esc(p.website_url)}</span>` : ''}
+                    </div>
+                </div>
+                <div class="d-flex gap-1 flex-shrink-0">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="window.open('${_esc(p.profile_url)}','_blank')" title="打开主页"><i class="bi bi-box-arrow-up-right"></i></button>
+                    ${_linkedinOauthAuthorized ? `<button class="btn btn-sm btn-outline-primary" onclick="resolveLinkedinProfile(${p.id})" title="用官方 API 刷新组织详情（名称/Logo/地点/员工规模/官网）"><i class="bi bi-arrow-repeat"></i></button>` : ''}
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteLinkedinProfile(${p.id})" title="删除"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    lc.innerHTML = `
+        <div class="mb-3">${rows}</div>
+        <hr class="my-2">
+        <form class="row g-2 align-items-center" onsubmit="addLinkedinProfile(event)">
+            <div class="col-12 col-sm">
+                <input type="url" class="form-control form-control-sm" id="newLinkedinUrl" placeholder="粘贴 LinkedIn 公司页 URL" required>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-accent"><i class="bi bi-plus-lg me-1"></i>手动添加</button>
+            </div>
+        </form>`;
+}
+
+async function discoverLinkedin() {
+    const btn = document.getElementById('btnDiscoverLinkedin') || document.getElementById('linkedinContainer');
+    if (btn.tagName === 'BUTTON') {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>查找中...';
+    }
+    try {
+        const data = await _fetchWithTimeout(`/api/customers/${customerId}/linkedin/discover`, { method: 'POST' }, 60000);
+        if (data.total === 0) {
+            showToast('未找到候选主页，可尝试手动粘贴 URL', 'info');
+        } else {
+            showToast(`找到 ${data.total} 个候选主页`, 'success');
+        }
+        await loadLinkedinProfiles();
+    } catch (err) {
+        showToast('查找失败: ' + err.message, 'danger');
+    } finally {
+        if (btn.tagName === 'BUTTON') {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search me-1"></i>查找候选';
+        }
+    }
+}
+
+async function addLinkedinProfile(e) {
+    e.preventDefault();
+    const url = document.getElementById('newLinkedinUrl').value.trim();
+    if (!url) return;
+    try {
+        await _fetchWithTimeout(`/api/customers/${customerId}/social-profiles`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_url: url }),
+        });
+        document.getElementById('newLinkedinUrl').value = '';
+        showToast('LinkedIn 主页已保存', 'success');
+        await loadLinkedinProfiles();
+    } catch (err) {
+        showToast('保存失败: ' + err.message, 'danger');
+    }
+}
+
+async function verifyLinkedinProfile(id, verified) {
+    try {
+        await _fetchWithTimeout(`/api/social-profiles/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_verified: verified }),
+        });
+        showToast(verified ? '已确认该主页' : '已取消确认', 'success');
+        await loadLinkedinProfiles();
+    } catch (err) {
+        showToast('操作失败: ' + err.message, 'danger');
+    }
+}
+
+async function deleteLinkedinProfile(id) {
+    const profile = _linkedinProfiles.find(p => p.id === id);
+    if (!profile) return;
+    if (!confirm(`确定删除 LinkedIn 主页 ${profile.display_name || profile.profile_url} 吗？`)) return;
+    try {
+        await _fetchWithTimeout(`/api/social-profiles/${id}`, { method: 'DELETE' });
+        showToast('已删除', 'success');
+        await loadLinkedinProfiles();
+    } catch (err) {
+        showToast('删除失败: ' + err.message, 'danger');
+    }
+}
+
+async function resolveLinkedinProfile(id) {
+    try {
+        const data = await _fetchWithTimeout(`/api/social-profiles/${id}/resolve`, { method: 'POST' }, 30000);
+        showToast('已用官方 API 刷新组织详情', 'success');
+        await loadLinkedinProfiles();
+    } catch (err) {
+        if (err.message.includes('尚未完成') || err.message.includes('授权')) {
+            showToast('请先在设置页完成 LinkedIn 授权: ' + err.message, 'warning');
+        } else {
+            showToast('刷新失败: ' + err.message, 'danger');
+        }
     }
 }
 
@@ -679,7 +1045,7 @@ function renderWaterfallResult(data, container, statusEl) {
                 <button class="btn btn-sm btn-outline-secondary me-1" onclick="_copyText('${_esc(email)}')" title="复制邮箱">
                     <i class="bi bi-clipboard"></i>
                 </button>
-                <button class="btn btn-sm btn-outline-success" onclick="saveSingleEmail('${_esc(email)}')" title="保存该邮箱到客户">
+                <button class="btn btn-sm btn-outline-success" onclick="saveSingleEmail('${_esc(email)}', '${source}')" title="保存该邮箱到客户">
                     <i class="bi bi-save"></i>
                 </button>
             </td>
@@ -713,31 +1079,45 @@ async function saveWaterfallEmails(setStatus) {
         return;
     }
 
-    const emails = _lastWaterfallEmails.emails.map(e => e.email).filter(Boolean);
-    if (emails.length === 0) {
+    // V5.1：按来源分组保存，保留来源信息
+    const groups = {};
+    _lastWaterfallEmails.emails.forEach(e => {
+        if (!e.email) return;
+        const src = e.source || 'scraped';
+        if (!groups[src]) groups[src] = [];
+        groups[src].push(e.email);
+    });
+    const entries = Object.entries(groups);
+    if (entries.length === 0) {
         showToast('没有有效的邮箱地址可保存', 'warning');
         return;
     }
 
+    let totalAdded = 0;
     try {
-        let url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify(emails))}`;
-        if (setStatus) url += `&set_status=${encodeURIComponent(setStatus)}`;
-
-        const result = await _fetchWithTimeout(url, { method: 'POST' });
-        showToast(`已保存 ${result.added} 个邮箱，共 ${result.email_count} 个`, 'success');
+        for (const [src, emails] of entries) {
+            let url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify(emails))}&source=${encodeURIComponent(src)}`;
+            if (setStatus) url += `&set_status=${encodeURIComponent(setStatus)}`;
+            const result = await _fetchWithTimeout(url, { method: 'POST' });
+            totalAdded += result.added;
+        }
+        showToast(`已保存 ${totalAdded} 个邮箱`, 'success');
         if (setStatus) {
             document.getElementById('followUpStatus').value = setStatus;
         }
+        await loadCustomerEmails();
     } catch (err) {
         showToast('保存失败: ' + err.message, 'danger');
     }
 }
 
-async function saveSingleEmail(email) {
+async function saveSingleEmail(email, source) {
     try {
-        const url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify([email]))}`;
+        let url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify([email]))}`;
+        if (source) url += `&source=${encodeURIComponent(source)}`;
         const result = await _fetchWithTimeout(url, { method: 'POST' });
         showToast(`已保存 1 个邮箱`, 'success');
+        await loadCustomerEmails();
     } catch (err) {
         showToast('保存失败: ' + err.message, 'danger');
     }
@@ -757,7 +1137,7 @@ async function saveHunterEmails(setStatus) {
     }
 
     try {
-        let url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify(emails))}`;
+        let url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify(emails))}&source=hunter`;
         if (setStatus) url += `&set_status=${encodeURIComponent(setStatus)}`;
 
         const result = await _fetchWithTimeout(url, { method: 'POST' });
@@ -769,6 +1149,7 @@ async function saveHunterEmails(setStatus) {
 
         const c = await _fetchWithTimeout(`/api/customers/${customerId}`);
         renderDetail(c);
+        await loadCustomerEmails();
 
         const followUpTab = document.getElementById('followUpTab');
         if (followUpTab) followUpTab.click();
@@ -779,11 +1160,12 @@ async function saveHunterEmails(setStatus) {
 
 async function saveSingleHunterEmail(email) {
     try {
-        const url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify([email]))}`;
+        const url = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify([email]))}&source=hunter`;
         const result = await _fetchWithTimeout(url, { method: 'POST' });
         showToast('✅ ' + result.message, 'success');
         const c = await _fetchWithTimeout(`/api/customers/${customerId}`);
         renderDetail(c);
+        await loadCustomerEmails();
     } catch (err) {
         showToast('保存失败: ' + err.message, 'danger');
     }
@@ -821,13 +1203,14 @@ async function hunterLookupAndSetStatus(setStatus) {
             return;
         }
 
-        const saveUrl = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify(emails))}&set_status=${encodeURIComponent(setStatus)}`;
+        const saveUrl = `/api/customers/${customerId}/add-emails?emails=${encodeURIComponent(JSON.stringify(emails))}&source=hunter&set_status=${encodeURIComponent(setStatus)}`;
         const saveResult = await _fetchWithTimeout(saveUrl, { method: 'POST' });
 
         showToast(`已保存 ${emails.length} 个邮箱并标记为「${setStatus}」`, 'success');
 
         const c = await _fetchWithTimeout(`/api/customers/${customerId}`);
         renderDetail(c);
+        await loadCustomerEmails();
 
         const followUpTab = document.getElementById('followUpTab');
         if (followUpTab) followUpTab.click();
@@ -908,10 +1291,12 @@ function openMailClient() {
     const bodyEl = document.getElementById('emailDraftBody');
     const subject = subjectEl ? subjectEl.value : '';
     const body = bodyEl ? bodyEl.value : '';
-    const customerEmails = document.querySelectorAll('#emailsContainer .email-badge');
     let to = '';
-    if (customerEmails.length > 0) {
-        to = customerEmails[0].textContent.trim();
+    const primary = _customerEmailRecords.find(r => r.is_primary);
+    if (primary) {
+        to = primary.email;
+    } else if (_customerEmailRecords.length > 0) {
+        to = _customerEmailRecords[0].email;
     }
     window.location.href = 'mailto:' + encodeURIComponent(to)
         + '?subject=' + encodeURIComponent(subject)
@@ -922,4 +1307,5 @@ function openMailClient() {
 document.addEventListener('DOMContentLoaded', () => {
     loadDetail();
     checkHunterConfigDetail();
+    loadLinkedinProfiles();
 });

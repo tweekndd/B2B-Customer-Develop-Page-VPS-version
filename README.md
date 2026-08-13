@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 # AI Customer Development System
 
@@ -54,6 +54,9 @@
 | **Tomba 邮箱查找** | Tomba.io API，返回数据更丰富（含领英、电话、部门、置信度评分），无结果不扣费 |
 | **Prospeo 邮箱发现** | Prospeo.io Search + Enrich API，瀑布流第 3 级，90 天内重复免费 |
 | **瀑布式邮箱发现** | 四级级联：Hunter → Tomba → Prospeo → 官网抓取兜底，自动按结果数量决定是否触发下一级 |
+| **邮箱结构化维护 V5.1** | `customer_emails` 表为邮箱唯一事实源：手动新增/编辑/删除/设主邮箱，来源与验证状态徽章，旧 JSON 一键合并，全链路双写兼容 |
+| **LinkedIn 公司页发现 V5.1** | 搜索引擎候选发现（`site:linkedin.com/company`，复用运行时切换引擎）→ 候选评分 → 人工确认，支持手动粘贴 URL |
+| **LinkedIn 官方 API V5.1** | OAuth 2.0 授权（设置页配置 Client ID / Secret）→ Organizations Lookup API（`?q=vanityName`）刷新组织详情：名称/Logo/地点/员工规模/官网 |
 | **相似客户扩展** | 输入公司网址 + 目标国家，自动搜索相似客户，支持多语言本地化搜索 |
 | **客户地理分布地图** | Leaflet.js 地图可视化：城市级定位 + MarkerCluster 聚合 + 暗色/亮色主题自适应 |
 | **智能去重** | 域名 + 标准化公司名双重去重，自动合并重复发现的关键词 |
@@ -207,6 +210,9 @@ cp .env.example .env
 | `TOMBA_API_KEY` | — | Tomba.io API Key |
 | `TOMBA_API_SECRET` | — | Tomba.io API Secret |
 | `PROSPEO_API_KEY` | — | Prospeo.io API Key |
+| `LINKEDIN_CLIENT_ID` | — | LinkedIn Developer App Client ID（V5.1，OAuth 用） |
+| `LINKEDIN_CLIENT_SECRET` | — | LinkedIn App Primary Client Secret（V5.1） |
+| `LINKEDIN_API_VERSION` | `202607` | LinkedIn-Version 请求头（Organizations Lookup API） |
 | `READER_BASE_URL` | `https://r.jina.ai` | Jina AI Reader API 地址 |
 | `FIRECRAWL_API_KEY` | — | （可选旧版兜底） |
 | `EMAIL_DISCOVERY_MIN_RESULTS` | `2` | 瀑布流结果低于此值触发下一级 |
@@ -264,12 +270,31 @@ cp .env.example .env
 
 > 系统会记住最近一次生成的草稿，刷新页面后仍保留，方便对照修改后手动发送。
 
+#### 邮箱联系人维护（V5.1）
+
+详情页 → 「邮箱联系人」卡片：
+- **手动新增邮箱**：输入邮箱地址（可选备注、设为主要），来源固定为 `manual`
+- 每条邮箱展示**来源徽章**（官网/Hunter/Tomba/Prospeo/手动）、**验证状态**、置信度、主邮箱星标
+- 点击 ⭐ 设为**主要邮箱**（同一客户唯一）、✏️ 编辑、🗑️ 删除
+- 旧版 JSON 邮箱数据未合并时显示黄色提示，一键**合并旧邮箱**（幂等）
+- Hunter/瀑布式查到的邮箱保存时自动按来源分组入库
+
+#### LinkedIn 公司主页（V5.1）
+
+详情页 → 「LinkedIn 公司主页」卡片：
+- 点击 **查找候选** → 系统用 `site:linkedin.com/company` 查询自动发现候选主页（自动过滤个人页），按置信度排序展示，**不自动确认**
+- 点击候选行 **确认** 按钮 → 标记为该客户已确认主页（同一客户唯一）
+- 也可**手动粘贴** LinkedIn 公司页 URL 保存
+- 完成 OAuth 授权后，候选行出现 **官方 API 刷新** 按钮 → 调用 Organizations Lookup API 补齐组织名称/Logo/地点/员工规模/官网
+- Excel 导出 H 列「领英」自动回填已确认主页
+
 ### AI 与 API 设置页（V4.6）
 
 导航栏 → **AI 与 API 设置**（需登录）：
 - **AI 模型**：选择 Provider（GLM / DeepSeek / Qwen / Moonshot / OpenAI / 自定义兼容接口）、填 API Key、设置默认模型与备用降级模型，支持「测试连接」
 - **邮箱服务**：Hunter / Tomba / Prospeo 的 Key 配置
 - **搜索引擎**：Tavily / SerpAPI / SearXNG 的 Key 或 URL，并设置首选引擎
+- **LinkedIn 授权（V5.1）**：在 [LinkedIn Developer Portal](https://www.linkedin.com/developers/apps) 创建 App → 填写 **Client ID** 与 **Primary Client Secret** → 保存后点击 **开始授权** → LinkedIn 授权页确认 → 自动回跳。需在 LinkedIn App 的 Redirect URLs 中添加 `https://你的域名/api/linkedin/oauth/callback`
 - Key **加密存储**（Fernet），仅本人可见，页面只显示后 4 位；未配置的服务自动回退服务器环境变量
 
 ### 客户地理分布地图
@@ -517,12 +542,17 @@ AI-Trade-Customer-Analyzer/
 │   │   ├── sync.py                   # 数据同步 / 备份恢复
 │   │   ├── config.py                 # 评分系统配置
 │   │   ├── user_config.py            # 用户级 API Key 配置（V4.6）
+│   │   ├── customer_emails.py        # 邮箱维护（V5.1）
+│   │   ├── linkedin.py               # LinkedIn 发现 + OAuth + Lookup（V5.1）
 │   │   ├── hunter.py / tomba.py / waterfall.py  # 邮箱查找
 │   │   ├── users.py                  # 用户管理
 │   │   └── geocode.py                # 地理编码
 │   ├── services/
 │   │   ├── glm_analyzer.py           # GLM AI 分析（含模型降级 + 买家意向评分）
 │   │   ├── email_composer.py         # AI 开发信生成（V4.6，多语种）
+│   │   ├── customer_email_service.py # 邮箱结构化统一服务（V5.1）
+│   │   ├── linkedin_service.py       # LinkedIn 公司页候选发现（V5.1）
+│   │   ├── linkedin_oauth_service.py # LinkedIn OAuth + Lookup API（V5.1）
 │   │   ├── user_config.py            # 用户级 API Key 服务层（加密存储）
 │   │   ├── google_discovery.py       # 搜索引擎（运行时切换）
 │   │   ├── searxng_discovery.py      # SearXNG 搜索客户端
@@ -548,7 +578,7 @@ AI-Trade-Customer-Analyzer/
 │   ├── static/js/                    # JS 模块（含 settings.js 设置页）
 │   ├── templates/                    # HTML 模板（含 settings.html / filemanager.html）
 │   └── filemanager.py                # VPS 文件管理器（仅管理员）
-└── tests/                            # 234 个测试用例
+└── tests/                            # 360 个测试用例
 ```
 
 ---
@@ -568,7 +598,10 @@ AI-Trade-Customer-Analyzer/
 | `email_quota_log` | 邮箱发现配额日志 |
 | `geocode_cache` | 地理编码缓存（唯一键 + 命中计数） |
 | `users` | 用户表（密码哈希 / 角色 / 权限 / 配额） |
-| `user_api_config` | 用户级 API Key（LLM/搜索/邮箱，Fernet 加密存储） |
+| `user_api_config` | 用户级 API Key（LLM/搜索/邮箱/LinkedIn，Fernet 加密存储） |
+| `customer_emails` | 结构化邮箱（V5.0 表 / V5.1 接线为唯一事实源：来源/验证/主邮箱/备注） |
+| `customer_social_profiles` | 社交主页（V5.1：LinkedIn 候选 + 已确认，唯一确认约束） |
+| `linkedin_oauth_tokens` | LinkedIn OAuth token（V5.1：user_id 唯一，加密存储 + 过期时间） |
 
 > **用户级 API Key**：`user_api_config` 表按「用户 + 服务」唯一存储各用户自己的 Key，加密密钥来自 `API_CONFIG_ENCRYPTION_KEY` 环境变量（未设置时自动生成并持久化到 `app/.config_encryption_key`，该文件已被 gitignore）。
 
@@ -607,7 +640,7 @@ AI-Trade-Customer-Analyzer/
 | **爬虫** | httpx + BeautifulSoup（异步并发）· Jina AI Reader 免费降级 |
 | **地图** | Leaflet.js + MarkerCluster + Nominatim |
 | **部署** | Docker · Docker Compose · Nginx · Let's Encrypt |
-| **测试** | pytest（234 测试用例：纯逻辑单元 + API 集成） |
+| **测试** | pytest（360 测试用例：纯逻辑单元 + API 集成） |
 | **缓存** | 本地 SQLite 多级缓存（搜索 / 官网 / AI 分析 / 邮箱 / 地理编码） |
 | **认证** | Session + bcrypt · 多用户 · 逐用户配额管控 |
 
@@ -617,7 +650,7 @@ AI-Trade-Customer-Analyzer/
 
 ```bash
 source venv/bin/activate
-pytest tests/ -v     # 234 测试，详细输出
+pytest tests/ -v     # 360 测试，详细输出
 pytest tests/ -q     # 简洁输出
 ```
 
@@ -628,3 +661,4 @@ pytest tests/ -q     # 简洁输出
 **© 2026 AI Customer Development System** · Apache-2.0 License · [GitHub](https://github.com/tweekndd/B2B-Customer-Develop-Page-VPS-version)
 
 </div>
+

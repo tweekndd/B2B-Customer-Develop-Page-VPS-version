@@ -20,6 +20,8 @@ from app.api.geocode import router as _geocode      # noqa: E402
 from app.api.auth import router as _auth            # noqa: E402
 from app.api.users import router as _users          # noqa: E402
 from app.api.user_config import router as _user_config  # noqa: E402
+from app.api.customer_emails import router as _customer_emails  # noqa: E402
+from app.api.linkedin import router as _linkedin  # noqa: E402
 
 # 合并路由（子路由器无 prefix，由顶层 /api 统一提供）
 # auth 和 users 无路径冲突，放在最前面
@@ -27,6 +29,8 @@ router.include_router(_auth)
 router.include_router(_geocode)
 router.include_router(_users)
 router.include_router(_user_config)
+router.include_router(_customer_emails)
+router.include_router(_linkedin)
 router.include_router(_customers)
 router.include_router(_discovery)
 router.include_router(_sync)

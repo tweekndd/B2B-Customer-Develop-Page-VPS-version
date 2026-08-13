@@ -3,6 +3,8 @@
  * 提供导出、导入、备份、恢复的一键操作
  * V4.6
  */
+(function() {
+'use strict';
 
 // ─── 页面初始化 ───
 document.addEventListener('DOMContentLoaded', () => {
@@ -368,3 +370,12 @@ function formatDate() {
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
+
+// 暴露需要从 HTML 调用的函数到全局
+window.doExport = doExport;
+window.doImport = doImport;
+window.doBackup = doBackup;
+window.doRestore = doRestore;
+window.confirmRestore = confirmRestore;
+
+})();

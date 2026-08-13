@@ -17,7 +17,7 @@ WORKDIR /app
 
 # 时区 / 常用工具（非必需，但方便调试）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates tzdata \
+    ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # 从 builder 阶段复制已安装的 Python 包
@@ -28,7 +28,11 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 
 # 创建运行时目录
-RUN mkdir -p app/uploads app/static/css app/templates
+RUN mkdir -p app/uploads app/static/css app/templates \
+    && chown -R appuser:appuser /app
+
+# 创建非 root 用户
+RUN useradd -r -s /bin/false -d /app appuser
 
 EXPOSE 8000
 
@@ -36,4 +40,6 @@ EXPOSE 8000
 # 注意：容器内监听 0.0.0.0 以便 Nginx 容器经 docker 内网访问；
 # 对外仅由 docker-compose 将端口绑定到宿主 127.0.0.1:8000（公网无法直连后台）。
 CMD mkdir -p /app/app/uploads /app/app/static/css && \
-    uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
+    exec uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info --no-access-log
+
+USER appuser

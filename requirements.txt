@@ -16,3 +16,4 @@ itsdangerous>=2.1.2  # Session 签名（Starlette SessionMiddleware 依赖）
 jinja2>=3.1.4          # 模板渲染（FileSystemLoader）
 cryptography>=3.4.8    # 用户 API Key 加密存储（Fernet，Round 3 新增）
 python-dotenv>=1.0.0   # .env 环境变量加载
+alembic>=1.13.0        # 数据库迁移管理

@@ -30,13 +30,15 @@ SERVICE_TAVILY = "tavily"
 SERVICE_SERPAPI = "serpapi"
 SERVICE_SEARXNG = "searxng"
 SERVICE_FIRECRAWL = "firecrawl"
+# LinkedIn OAuth（api_key=Client ID，api_secret=Primary Client Secret）
+SERVICE_LINKEDIN = "linkedin"
 # 用户偏好的搜索引擎（base_url 字段存引擎名: tavily/serpapi/searxng）
 SERVICE_SEARCH_ENGINE = "search_engine"
 
 ALL_SERVICES = [
     SERVICE_LLM, SERVICE_HUNTER, SERVICE_TOMBA, SERVICE_PROSPEO,
     SERVICE_TAVILY, SERVICE_SERPAPI, SERVICE_SEARXNG,
-    SERVICE_FIRECRAWL, SERVICE_SEARCH_ENGINE,
+    SERVICE_FIRECRAWL, SERVICE_LINKEDIN, SERVICE_SEARCH_ENGINE,
 ]
 
 # 服务 → 环境变量名（按优先级排序）映射
@@ -48,6 +50,7 @@ _ENV_KEY_MAP = {
     SERVICE_TAVILY: ("TAVILY_API_KEY",),
     SERVICE_SERPAPI: ("SERPAPI_API_KEY",),
     SERVICE_FIRECRAWL: ("FIRECRAWL_API_KEY",),
+    SERVICE_LINKEDIN: ("LINKEDIN_CLIENT_ID",),
 }
 
 _fernet: Optional[Fernet] = None
@@ -144,9 +147,11 @@ def get_env_api_key(service: str) -> str:
 
 
 def get_env_api_secret(service: str) -> str:
-    """读取环境变量的默认 Secret（目前仅 Tomba）"""
+    """读取环境变量的默认 Secret"""
     if service == SERVICE_TOMBA:
         return os.environ.get("TOMBA_API_SECRET", "").strip()
+    if service == SERVICE_LINKEDIN:
+        return os.environ.get("LINKEDIN_CLIENT_SECRET", "").strip()
     return ""
 
 

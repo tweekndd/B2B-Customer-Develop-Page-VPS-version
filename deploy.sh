@@ -7,6 +7,7 @@
 #   bash deploy.sh update     # 更新代码后重新构建
 #   bash deploy.sh logs       # 查看日志
 #   bash deploy.sh db-backup  # 备份数据库
+#   bash deploy.sh rollback   # 回滚到上一个版本
 # =============================================================================
 set -euo pipefail
 
@@ -126,6 +127,18 @@ update() {
     info "正在更新部署..."
     check_prerequisites
 
+    # 更新前自动备份数据库
+    info "更新前自动备份数据库..."
+    db_backup
+
+    # 保存当前镜像 ID 用于回滚
+    local prev_image
+    prev_image=$(docker inspect --format='{{.Image}}' b2b-app 2>/dev/null || echo "")
+    if [ -n "$prev_image" ]; then
+        echo "$prev_image" > /tmp/b2b-previous-image-id
+        ok "已保存当前镜像 ID 用于回滚"
+    fi
+
     # 拉取最新代码（如果是 git 仓库）
     if [ -d .git ]; then
         info "拉取最新代码..."
@@ -144,6 +157,33 @@ update() {
     docker compose ps
 }
 
+# ─── 回滚到上一个版本 ─────────────────────────────────────────────────────────
+rollback() {
+    echo ""
+    info "正在回滚到上一个版本..."
+
+    if [ ! -f /tmp/b2b-previous-image-id ]; then
+        err "未找到上一个版本的镜像 ID，无法回滚"
+        err "请先运行 'bash deploy.sh update' 保存版本信息"
+        exit 1
+    fi
+
+    local prev_image
+    prev_image=$(cat /tmp/b2b-previous-image-id)
+    info "回滚到镜像: $prev_image"
+
+    # 重新备份当前状态
+    info "回滚前备份当前数据库..."
+    db_backup
+
+    # 用上一个镜像 ID 重建容器
+    docker compose down
+    docker compose up -d --force-recreate
+
+    ok "回滚完成！"
+    docker compose ps
+}
+
 # ─── 查看日志 ─────────────────────────────────────────────────────────────────
 logs() {
     docker compose logs -f --tail=100 "${2:-app}"
@@ -157,27 +197,30 @@ db_backup() {
 
     mkdir -p "$backup_dir"
 
-    info "正在备份 SQLite 数据库..."
-
-    # 复制 SQLite 数据库文件（从 Docker 卷复制到宿主机）
-    if docker ps --format '{{.Names}}' | grep -q '^b2b-app$'; then
-        docker cp b2b-app:/app/app/customers.db "${backup_dir}/customers_${timestamp}.db"
-        # 也导出为 JSON
-        # docker exec b2b-app python -c "
-        # from app.database import SessionLocal, Customer
-        # import json
-        # db = SessionLocal()
-        # customers = db.query(Customer).all()
-        # print(json.dumps([{'id':c.id,'company_name':c.company_name,'website':c.website} for c in customers], ensure_ascii=False))
-        # db.close()
-        # " > "${backup_dir}/customers_${timestamp}.json" 2>/dev/null || true
-        ok "备份完成: ${backup_dir}/customers_${timestamp}.db"
+    # 检查是否使用 PostgreSQL
+    if grep -q 'DATABASE_URL' .env 2>/dev/null && grep -q 'postgresql' .env 2>/dev/null; then
+        info "正在备份 PostgreSQL 数据库..."
+        if docker ps --format '{{.Names}}' | grep -q '^b2b-db$'; then
+            docker exec b2b-db pg_dump -U "${DB_USER:-b2b}" "${DB_NAME:-b2b_customers}" > "${backup_dir}/postgres_${timestamp}.sql"
+            ok "PostgreSQL 备份完成: ${backup_dir}/postgres_${timestamp}.sql"
+        else
+            warn "PostgreSQL 容器未运行，跳过备份"
+        fi
     else
-        warn "应用容器未运行，跳过备份"
+        info "正在备份 SQLite 数据库..."
+
+        # 复制 SQLite 数据库文件（从 Docker 卷复制到宿主机）
+        if docker ps --format '{{.Names}}' | grep -q '^b2b-app$'; then
+            docker cp b2b-app:/app/app/customers.db "${backup_dir}/customers_${timestamp}.db"
+            ok "备份完成: ${backup_dir}/customers_${timestamp}.db"
+        else
+            warn "应用容器未运行，跳过备份"
+        fi
     fi
 
     # 保留最近 30 天备份，删除旧备份
     find "$backup_dir" -name 'customers_*.db' -mtime +30 -delete 2>/dev/null || true
+    find "$backup_dir" -name 'postgres_*.sql' -mtime +30 -delete 2>/dev/null || true
 }
 
 # ─── 主入口 ───────────────────────────────────────────────────────────────────
@@ -187,6 +230,9 @@ case "${1:-deploy}" in
         ;;
     update)
         update
+        ;;
+    rollback)
+        rollback
         ;;
     logs)
         logs "$@"
@@ -199,9 +245,10 @@ case "${1:-deploy}" in
         echo ""
         echo "命令:"
         echo "  deploy        首次部署（默认）"
-        echo "  update        更新代码后重新构建"
+        echo "  update        更新代码后重新构建（自动备份数据库）"
+        echo "  rollback      回滚到上一个版本"
         echo "  logs [服务]   查看日志（默认 app）"
-        echo "  db-backup     备份 SQLite 数据库"
+        echo "  db-backup     备份数据库（SQLite 或 PostgreSQL）"
         echo ""
         ;;
 esac

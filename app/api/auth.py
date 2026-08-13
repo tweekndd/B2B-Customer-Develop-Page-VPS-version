@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 from app.database import get_db, User
-from app.auth import verify_password, get_current_user
+from app.auth import (
+    verify_password, get_current_user,
+    check_login_rate_limit, record_login_failure, clear_login_failures,
+)
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -19,15 +22,24 @@ class LoginRequest(BaseModel):
 @router.post("/login")
 def login(req: LoginRequest, request: Request, db: DBSession = Depends(get_db)):
     """用户登录"""
+    # 登录频率限制（防暴力破解）
+    if not check_login_rate_limit(req.username):
+        raise HTTPException(status_code=429, detail="登录尝试次数过多，请 5 分钟后再试")
+
     user = db.query(User).filter(User.username == req.username).first()
     if not user:
+        record_login_failure(req.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账号已被禁用")
 
     if not verify_password(req.password, user.password_hash):
+        record_login_failure(req.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    # 登录成功，清除失败记录
+    clear_login_failures(req.username)
 
     # 写入 Session
     request.session["user_id"] = user.id

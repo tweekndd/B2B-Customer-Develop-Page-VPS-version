@@ -85,6 +85,56 @@
                 <div id="emailServiceRows"></div>
             </div>
         </div>
+
+        <!-- ═══════════ LinkedIn OAuth 配置（V5.1） ═══════════ -->
+        <div class="card border-0 mb-4" data-animate data-delay="250">
+            <div class="card-header d-flex align-items-center">
+                <i class="bi bi-linkedin"></i> LinkedIn 授权（Organizations Lookup API）
+                <span class="ms-auto" id="linkedinStatusBadge"></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    在 <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener" class="text-decoration-none">LinkedIn Developer Portal</a>
+                    创建 App，获取 <strong>Client ID</strong> 与 <strong>Primary Client Secret</strong>，填写后保存并授权。
+                    授权后可在客户详情页用官方 API（<code>GET /rest/organizations?q=vanityName</code>）刷新候选组织详情（名称、Logo、地点、员工规模、官网）。
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Client ID</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="linkedinClientId" placeholder="86xxxxxx" autocomplete="off">
+                            <button class="btn btn-outline-secondary" type="button" onclick="toggleKey('linkedinClientId', this)"><i class="bi bi-eye"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Primary Client Secret</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="linkedinClientSecret" placeholder="WPL_AP1...." autocomplete="off">
+                            <button class="btn btn-outline-secondary" type="button" onclick="toggleKey('linkedinClientSecret', this)"><i class="bi bi-eye"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-text mb-3">
+                    回调地址（Redirect URLs）需在 LinkedIn App 设置中添加：
+                    <code id="linkedinCallbackHint">http(s)://你的域名/api/linkedin/oauth/callback</code>
+                </div>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <button class="btn btn-accent" onclick="saveLinkedinConfig()" id="btnSaveLinkedin">
+                        <i class="bi bi-floppy me-1"></i>保存配置
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="startLinkedinOauth()" id="btnLinkedinOauth">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>开始授权
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="disconnectLinkedinOauth()" id="btnLinkedinDisconnect" style="display:none">
+                        <i class="bi bi-x-circle me-1"></i>断开授权
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="deleteService('linkedin')">
+                        <i class="bi bi-trash me-1"></i>删除我的配置
+                    </button>
+                    <span id="linkedinOauthHint" class="small text-muted"></span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ═══════════ 搜索引擎配置 ═══════════ -->

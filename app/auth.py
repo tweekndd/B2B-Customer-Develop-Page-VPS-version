@@ -3,10 +3,17 @@
 提供密码加密、Session 会话管理、角色权限检查、功能级权限校验
 """
 import os
+import time
 import bcrypt
 from fastapi import Request, HTTPException, Depends
 from sqlalchemy.orm import Session as DBSession
 from app.database import get_db, User
+
+
+# ── 登录失败限流（进程内存，防暴力破解） ──
+_failed_login_attempts: dict = {}  # username -> (count, first_failure_time)
+_MAX_FAILED_ATTEMPTS = 5
+_LOCKOUT_DURATION = 300  # 5 分钟
 
 
 def hash_password(password: str) -> str:
@@ -17,6 +24,36 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     """校验密码是否匹配"""
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+def check_login_rate_limit(username: str) -> bool:
+    """检查登录频率限制，返回 True 表示允许尝试，False 表示被锁定"""
+    now = time.monotonic()
+    if username in _failed_login_attempts:
+        count, first_time = _failed_login_attempts[username]
+        # 锁定时间已过，重置计数
+        if now - first_time > _LOCKOUT_DURATION:
+            del _failed_login_attempts[username]
+            return True
+        # 超过最大尝试次数
+        if count >= _MAX_FAILED_ATTEMPTS:
+            return False
+    return True
+
+
+def record_login_failure(username: str):
+    """记录一次登录失败"""
+    now = time.monotonic()
+    if username in _failed_login_attempts:
+        count, first_time = _failed_login_attempts[username]
+        _failed_login_attempts[username] = (count + 1, first_time)
+    else:
+        _failed_login_attempts[username] = (1, now)
+
+
+def clear_login_failures(username: str):
+    """清除登录失败记录（登录成功时调用）"""
+    _failed_login_attempts.pop(username, None)
 
 
 def get_user_from_session(request: Request, db: DBSession) -> User | None:

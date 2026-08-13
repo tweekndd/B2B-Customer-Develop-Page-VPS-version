@@ -1,5 +1,42 @@
 # 更新日志
 
+## v5.1（2026-08-13）
+
+### 📬 客户邮箱结构化维护（CustomerEmail 接线）
+
+此前 V5.0 已建 `customer_emails` 表但从未被业务代码使用，所有邮箱仍写入 `customers.emails` JSON。本版本将其接线为邮箱**唯一事实源**，JSON 降级为兼容视图（双写）：
+
+- **统一服务** `app/services/customer_email_service.py`：`normalize_email()`（RFC 基础校验 + 转小写 + TLD≥2）、`upsert_customer_email()`（customer_id+email 幂等去重）、`bulk_upsert_customer_emails()`、`update_customer_email()` / `delete_customer_email()` / `merge_legacy_emails()`；**唯一主邮箱互斥**；写表后自动重建 `customers.emails` JSON 视图
+- **数据库**：`customer_emails` 补列 `local_part` / `domain`(索引) / `source_detail` / `notes` / `created_by_user_id` / `updated_at`（自动迁移）+ 索引
+- **新 API** `app/api/customer_emails.py`：`GET/POST /api/customers/{id}/emails`、`PUT/DELETE /api/customer-emails/{email_id}`、`POST /api/customers/{id}/emails/merge-legacy`；手动新增来源固定 `manual`（防伪造），重复邮箱幂等处理，非法格式 400
+- **既有写入点全部改走 service**：`search_task_service.py`（搜索管道）、`customers.py` 的 `analyze_single` / `re-scrape` / `add-emails`（新增可选 `source` 参数：hunter/tomba/prospeo/website/manual）；`re-scrape` 从「覆盖邮箱」改为「增量合并」
+- **详情页**：邮箱卡片改造为「邮箱列表 + 手动新增表单」，展示来源徽章 / 验证状态 / 置信度 / 主邮箱星标（点击设为主）/ 编辑 / 删除；旧 JSON 数据提示一键合并；`openMailClient()` 优先主邮箱；Hunter/瀑布保存按来源分组入库
+- **评分联动**：分析/重新抓取后评分使用合并后的全量邮箱（联系方式得分更准确）
+- **sync**：导出 version → `2.7` 含 `customer_emails` 结构化数据；导入对**已存在客户也合并邮箱**（修复原"跳过"导致邮箱变更无法同步）；新客户创建时一并导入
+- **顺手修复**：`/api/customers/{customer_id}` 增加 `:int` 转换器，避免 `/customers/export-excel` 被误匹配返回 422
+
+### 🔗 LinkedIn 公司主页候选发现
+
+- **数据库**：新增 `customer_social_profiles` 表（platform / profile_type / profile_url / vanity_name / external_id / display_name / website_url / logo_url / location_json / staff_count_range / source / confidence / is_verified / last_fetched_at / raw_json 等），唯一约束 `customer_id+platform+profile_type+profile_url`，同一客户最多一个 `is_verified=1`
+- **新服务** `app/services/linkedin_service.py`：`normalize_company_url()`（标准化公司页 URL，过滤 `/in/` 个人页 / 职位页 / Learning / Feed）、`extract_vanity_name()`、`score_company_page_candidate()`（域名根 50 + 公司名 30 + 国家/城市 10 + 发现关键词 10，仅排序）、`discover_company_pages()` **复用统一搜索引擎**（`site:linkedin.com/company` 三模板，运行时切换 SearXNG/Tavily/SerpAPI，不重复实现搜索）、`upsert_social_profile()` 幂等 + 唯一已确认约束
+- **新 API** `app/api/linkedin.py`：候选列表 / 触发发现（返回候选不自动确认）/ 手动新增（来源固定 manual）/ 确认·编辑 / 删除
+- **详情页**：新增「LinkedIn 公司主页」卡片——已确认/候选列表、查找候选、确认、手动粘贴 URL、删除
+- **Excel 导出**：H 列「领英」回填已确认主页
+
+### 🔐 LinkedIn OAuth 2.0 + Organizations Lookup API
+
+参考微软官方文档 *Organizations and Brands Overview / Organization Lookup API*，按方案文档第三期接入：
+
+- **凭据管理**：`user_api_config` 新增 `linkedin` 服务（api_key=Client ID，api_secret=Primary Client Secret，Fernet 加密），环境变量回退 `LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET`；**设置页新增「LinkedIn 授权」卡片**（保存/脱敏回显/授权状态徽章/开始授权/断开授权/删除配置）
+- **数据库**：新增 `linkedin_oauth_tokens` 表（user_id 唯一，access token 加密存储 + 过期时间）
+- **新服务** `app/services/linkedin_oauth_service.py`：3-legged OAuth（授权 URL 构造、code 兑换 token、token 加密存取与过期判断）；**Organizations Lookup API 客户端** `GET /rest/organizations?q=vanityName&vanityName=...`（`LinkedIn-Version` + `X-Restli-Protocol-Version` 头，401/403 → 提示重新授权，404 → 未找到）
+- **新 API**：`GET /api/linkedin/oauth/status|start`（state 防 CSRF + next 防开放重定向）、`GET /api/linkedin/oauth/callback`（校验 state → 兑换 → 回跳）、`POST /api/linkedin/oauth/disconnect`、`POST /api/social-profiles/{id}/resolve`（官方 API 刷新候选：名称/URN/员工规模/地点/Logo/官网）
+- **详情页**：已授权后候选行显示「官方 API 刷新」按钮
+
+**验证**：`pytest tests/` **360 个测试全部通过**（新增 20 个邮箱维护 + 15 个 LinkedIn 发现 + 18 个 OAuth/Lookup）。
+
+---
+
 ## v4.6（2026-08-06）
 
 ### 🎯 买家/供应商评分分级 + 多语种 AI 开发信生成

@@ -1,0 +1,56 @@
+# =============================================================================
+# B2B Customer Develop Platform — .dockerignore
+# =============================================================================
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# SSL certificates (mounted via volume, not baked in)
+certs/
+
+# Backups
+backups/
+
+# Tests
+tests/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.db-journal
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+LICENSE
+AGENTS.md
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (not needed inside the image)
+Dockerfile
+docker-compose.yml
+docker-compose*.yml
+.dockerignore
+
+# Deploy scripts
+deploy.sh
+start.sh
+
+# Logs
+logs/
+*.log

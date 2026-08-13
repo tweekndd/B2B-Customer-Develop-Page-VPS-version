@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, Customer, SearchTask, SearchCache, WebsiteCache, AnalysisCache
 from app.services.deduplication import find_existing_customer
+from app.services.customer_email_service import upsert_customer_email
 
 router = APIRouter(tags=["sync"])
 
@@ -52,6 +53,18 @@ def export_all_data(db: Session = Depends(get_db)):
     customers = db.query(Customer).order_by(Customer.id).all()
     customers_data = []
     for c in customers:
+        # V5.1：导出结构化邮箱记录
+        email_records = []
+        for r in c.email_records:
+            email_records.append({
+                "email": r.email,
+                "source": r.source or "manual",
+                "source_detail": r.source_detail,
+                "verification": r.verification,
+                "is_primary": bool(r.is_primary),
+                "notes": r.notes,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            })
         customers_data.append({
             "id": c.id,
             "company_name": c.company_name,
@@ -61,6 +74,7 @@ def export_all_data(db: Session = Depends(get_db)):
             "discovery_keyword": c.discovery_keyword,
             "first_found_at": c.first_found_at.isoformat() if c.first_found_at else None,
             "emails": c.emails,
+            "customer_emails": email_records,
             "website_text": c.website_text,
             "positive_keywords": c.positive_keywords,
             "negative_keywords": c.negative_keywords,
@@ -153,7 +167,7 @@ def export_all_data(db: Session = Depends(get_db)):
 
     return {
         "exported_at": datetime.datetime.utcnow().isoformat(),
-        "version": "2.6",
+        "version": "2.7",
         "stats": {
             "customers": len(customers_data),
             "search_tasks": len(tasks_data),
@@ -169,6 +183,30 @@ def export_all_data(db: Session = Depends(get_db)):
             "analysis_cache": analysis_cache_data,
         },
     }
+
+
+def _merge_imported_emails(db: Session, customer: Customer, c_data: dict) -> int:
+    """把导出数据中的结构化邮箱记录合并到 CustomerEmail 表（V5.1）"""
+    merged = 0
+    for e in c_data.get("customer_emails") or []:
+        if not e or not e.get("email"):
+            continue
+        try:
+            record = upsert_customer_email(
+                db,
+                customer.id,
+                e["email"],
+                source=e.get("source") or "legacy",
+                source_detail=e.get("source_detail"),
+                notes=e.get("notes"),
+                is_primary=bool(e.get("is_primary")),
+            )
+            if e.get("verification"):
+                record.verification = e["verification"]
+            merged += 1
+        except ValueError:
+            continue
+    return merged
 
 
 @router.post("/sync/import")
@@ -220,6 +258,8 @@ def import_sync_data(
         existing = find_existing_customer(db, c_data.get("website", ""), c_data.get("company_name", ""))
         if existing:
             skip_count += 1
+            # V5.1：已存在客户仍合并导入的结构化邮箱（修复邮箱变更无法同步）
+            _merge_imported_emails(db, existing, c_data)
             continue
 
         customer = Customer(
@@ -264,6 +304,9 @@ def import_sync_data(
             customer.analyzed_at = datetime.datetime.fromisoformat(c_data["analyzed_at"])
 
         db.add(customer)
+        db.flush()  # 获取 customer.id 供邮箱合并
+        # V5.1：导入结构化邮箱记录（同时同步 JSON 视图）
+        _merge_imported_emails(db, customer, c_data)
         cust_count += 1
 
     # ── 3. 导入 search_cache（缓存数据，带关键词+国家去重） ──

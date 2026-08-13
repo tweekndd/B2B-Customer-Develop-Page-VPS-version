@@ -27,6 +27,24 @@ from app.llm.providers.base import BaseLLMProvider, LLMChatResult
 
 logger = logging.getLogger("llm.openai_compatible")
 
+# 模块级共享 httpx 客户端，复用连接池
+_shared_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_shared_client(timeout: float = 60.0) -> httpx.AsyncClient:
+    """获取或创建共享的 httpx.AsyncClient（连接池复用）"""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30,
+            ),
+        )
+    return _shared_client
+
 
 class OpenAICompatibleProvider(BaseLLMProvider):
     """OpenAI 兼容协议 Provider"""
@@ -72,14 +90,13 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         payload: Dict[str, Any],
         model: str,
     ) -> LLMChatResult:
-        timeout = httpx.Timeout(self.timeout)
+        client = _get_shared_client(self.timeout)
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    self._build_url(),
-                    headers=self._build_headers(),
-                    json=payload,
-                )
+            response = await client.post(
+                self._build_url(),
+                headers=self._build_headers(),
+                json=payload,
+            )
         except httpx.TimeoutException as e:
             raise LLMTimeoutError(f"请求超时（>{self.timeout}s）") from e
         except httpx.HTTPError as e:
@@ -89,6 +106,11 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             self._classify_http_error(e)
+
+        # 限制响应大小（防 OOM）
+        content_length = response.headers.get("content-length")
+        if content_length and int(content_length) > 10 * 1024 * 1024:  # 10MB
+            raise LLMContentError("模型响应过大（>10MB），拒绝处理")
 
         try:
             data = response.json()

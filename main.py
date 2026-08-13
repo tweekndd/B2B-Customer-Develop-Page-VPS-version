@@ -212,7 +212,11 @@ def _login_required_page(request: Request, template: str, **kwargs):
     try:
         user = get_user_from_session(request, db_session)
         if user is None:
-            return RedirectResponse(url="/login?next=" + request.url.path, status_code=302)
+            next_path = request.url.path
+            # 安全校验：只允许相对路径，防止开放重定向
+            if not next_path or not next_path.startswith("/") or next_path.startswith("//"):
+                next_path = "/"
+            return RedirectResponse(url="/login?next=" + next_path, status_code=302)
         return templates.TemplateResponse(
             request,
             template,

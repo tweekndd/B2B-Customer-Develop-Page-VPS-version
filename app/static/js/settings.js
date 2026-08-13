@@ -1,6 +1,8 @@
 /* ============================================
    AI Trade Customer Analyzer V4.6 - AI 与 API 设置页
    ============================================ */
+(function() {
+'use strict';
 
 // ── Provider 默认值 ──
 const PROVIDER_DEFAULTS = {
@@ -376,6 +378,121 @@ async function loadSearchEngine() {
 }
 
 // ═══════════════════════════════════════════
+// LinkedIn OAuth（V5.1）
+// ═══════════════════════════════════════════
+
+function renderLinkedinConfig(savedConfig, effective, oauthStatus) {
+    const badge = document.getElementById('linkedinStatusBadge');
+    if (!badge) return;
+
+    // 凭据状态
+    const credBadge = effective && effective.configured
+        ? (effective.source === 'user'
+            ? '<span class="badge rounded-pill bg-success">已配置（用户）</span>'
+            : '<span class="badge rounded-pill bg-info text-dark">服务器默认</span>')
+        : '<span class="badge rounded-pill bg-secondary">未配置</span>';
+    // 授权状态
+    const auth = oauthStatus || {};
+    let authBadge = '<span class="badge rounded-pill bg-secondary">未授权</span>';
+    if (auth.authorized) {
+        const exp = auth.expires_at ? new Date(auth.expires_at).toLocaleString() : '';
+        authBadge = `<span class="badge rounded-pill bg-success" title="过期时间: ${_esc(exp)}">已授权</span>`;
+    }
+    badge.innerHTML = credBadge + ' ' + authBadge;
+
+    // 已配置的凭据回显（仅后4位）
+    if (savedConfig) {
+        if (savedConfig.api_key_set) {
+            document.getElementById('linkedinClientId').placeholder = savedConfig.api_key + '（点击输入框替换）';
+        }
+        if (savedConfig.api_secret_set) {
+            document.getElementById('linkedinClientSecret').placeholder = savedConfig.api_secret + '（点击输入框替换）';
+        }
+    }
+
+    // 授权按钮状态
+    const btnOauth = document.getElementById('btnLinkedinOauth');
+    const btnDisc = document.getElementById('btnLinkedinDisconnect');
+    const hint = document.getElementById('linkedinOauthHint');
+    if (!auth.client_configured) {
+        btnOauth.disabled = true;
+        btnOauth.innerHTML = '<i class="bi bi-box-arrow-up-right me-1"></i>先保存配置';
+        btnDisc.style.display = 'none';
+        if (hint) hint.textContent = '请先填写并保存 Client ID / Secret';
+    } else {
+        btnOauth.disabled = false;
+        btnOauth.innerHTML = '<i class="bi bi-box-arrow-up-right me-1"></i>开始授权';
+        btnDisc.style.display = auth.authorized ? 'inline-block' : 'none';
+        if (hint) hint.textContent = auth.authorized ? '已授权，可在客户详情页用官方 API 刷新组织详情' : '';
+    }
+}
+
+async function saveLinkedinConfig() {
+    const clientId = document.getElementById('linkedinClientId').value.trim();
+    const clientSecret = document.getElementById('linkedinClientSecret').value.trim();
+    const payload = {
+        api_key: clientId || null,
+        api_secret: clientSecret || null,
+        enabled: true,
+    };
+    if (!clientId && !clientSecret) {
+        showToast('请至少填写 Client ID 或 Client Secret', 'warning');
+        return;
+    }
+    const btn = document.getElementById('btnSaveLinkedin');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>保存中...';
+    try {
+        const res = await saveService('linkedin', payload);
+        showToast(res.message || 'LinkedIn 配置已保存', 'success');
+        document.getElementById('linkedinClientId').value = '';
+        document.getElementById('linkedinClientSecret').value = '';
+        document.getElementById('linkedinClientId').placeholder = '';
+        document.getElementById('linkedinClientSecret').placeholder = '';
+        await loadAll();
+    } catch (err) {
+        showToast('保存失败: ' + err.message, 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-floppy me-1"></i>保存配置';
+    }
+}
+
+async function startLinkedinOauth() {
+    try {
+        const status = await _fetchWithTimeout('/api/linkedin/oauth/status');
+        if (!status.client_configured) {
+            showToast('请先保存 Client ID / Secret', 'warning');
+            return;
+        }
+        // 跳转到授权页（完成授权后回到设置页）
+        window.location.href = '/api/linkedin/oauth/start?next=/settings';
+    } catch (err) {
+        showToast('启动授权失败: ' + err.message, 'danger');
+    }
+}
+
+async function disconnectLinkedinOauth() {
+    if (!confirm('确定断开 LinkedIn 授权吗？断开后将无法使用官方 API 刷新组织详情。')) return;
+    try {
+        const res = await _fetchWithTimeout('/api/linkedin/oauth/disconnect', { method: 'POST' });
+        showToast(res.message || '已断开授权', 'success');
+        await loadAll();
+    } catch (err) {
+        showToast('操作失败: ' + err.message, 'danger');
+    }
+}
+
+async function loadLinkedinOauthStatus() {
+    try {
+        const status = await _fetchWithTimeout('/api/linkedin/oauth/status');
+        return status;
+    } catch (err) {
+        return {};
+    }
+}
+
+// ═══════════════════════════════════════════
 // 整体加载
 // ═══════════════════════════════════════════
 
@@ -389,6 +506,9 @@ async function loadAll() {
         renderLlmConfig(savedMap.llm || null, effMap.llm || {});
         renderEmailServices(savedMap, effMap);
         renderSearchServices(savedMap, effMap);
+
+        const oauthStatus = await loadLinkedinOauthStatus();
+        renderLinkedinConfig(savedMap.linkedin || null, effMap.linkedin || {}, oauthStatus);
     } catch (err) {
         showToast('加载配置失败: ' + err.message, 'danger');
     }
@@ -396,3 +516,17 @@ async function loadAll() {
 }
 
 document.addEventListener('DOMContentLoaded', loadAll);
+
+// 暴露需要从 HTML 调用的函数到全局
+window.onProviderChange = onProviderChange;
+window.saveLlmConfig = saveLlmConfig;
+window.testLlmConnection = testLlmConnection;
+window.saveGenericService = saveGenericService;
+window.deleteService = deleteService;
+window.applyPreferredEngine = applyPreferredEngine;
+window.toggleKey = toggleKey;
+window.saveLinkedinConfig = saveLinkedinConfig;
+window.startLinkedinOauth = startLinkedinOauth;
+window.disconnectLinkedinOauth = disconnectLinkedinOauth;
+
+})();

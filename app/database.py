@@ -6,8 +6,8 @@ V2.6：支持 PostgreSQL 通过 DATABASE_URL 环境变量切换
 """
 import os
 import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Date, Float, UniqueConstraint
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Date, Float, UniqueConstraint, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # 数据库连接：优先使用环境变量 DATABASE_URL，否则回退到 SQLite
 _DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
@@ -90,6 +90,75 @@ class Customer(Base):
     latitude = Column(Float, nullable=True, default=None, comment="纬度")
     longitude = Column(Float, nullable=True, default=None, comment="经度")
     geocode_status = Column(String(20), default="pending", comment="地理编码状态: pending/done/failed")
+
+    # V5.0 新增：邮箱关系（规范化到独立表）
+    email_records = relationship("CustomerEmail", back_populates="customer", cascade="all, delete-orphan")
+
+
+class CustomerEmail(Base):
+    """客户邮箱（V5.0 新增，从 customers.emails JSON 规范化为独立表）"""
+    __tablename__ = "customer_emails"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True, comment="关联客户ID")
+    email = Column(String(255), nullable=False, index=True, comment="邮箱地址")
+    local_part = Column(String(255), nullable=True, comment="邮箱用户名部分")
+    domain = Column(String(255), nullable=True, index=True, comment="邮箱域名")
+    source = Column(String(30), nullable=True, comment="来源: website/hunter/tomba/prospeo/manual/legacy")
+    source_detail = Column(String(255), nullable=True, comment="来源详情（搜索任务ID/第三方查询类型/用户备注）")
+    first_name = Column(String(100), nullable=True, comment="名")
+    last_name = Column(String(100), nullable=True, comment="姓")
+    position = Column(String(200), nullable=True, comment="职位")
+    department = Column(String(100), nullable=True, comment="部门")
+    phone = Column(String(50), nullable=True, comment="电话")
+    linkedin = Column(String(500), nullable=True, comment="LinkedIn URL")
+    score = Column(Integer, default=0, comment="置信度分数 0-100")
+    verification = Column(String(30), nullable=True, comment="验证状态: valid/invalid/unknown")
+    notes = Column(Text, nullable=True, comment="用户备注")
+    created_by_user_id = Column(Integer, nullable=True, comment="手动新增者用户ID")
+    is_primary = Column(Integer, default=0, comment="是否主要联系邮箱: 1是/0否")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, comment="更新时间")
+
+    customer = relationship("Customer", back_populates="email_records")
+
+    __table_args__ = (
+        UniqueConstraint("customer_id", "email", name="uq_customer_email"),
+    )
+
+
+class CustomerSocialProfile(Base):
+    """客户社交主页（V5.1 新增，LinkedIn 公司主页候选与确认）
+
+    同一客户可保留多个候选，但最多一个 is_verified=1 的主页。
+    """
+    __tablename__ = "customer_social_profiles"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True, comment="关联客户ID")
+    platform = Column(String(30), default="linkedin", comment="平台: linkedin")
+    profile_type = Column(String(30), default="company", comment="主页类型: company")
+    profile_url = Column(String(500), nullable=False, comment="标准化后的公开 URL")
+    vanity_name = Column(String(200), nullable=True, comment="LinkedIn vanity name")
+    external_id = Column(String(200), nullable=True, comment="平台组织ID/URN（官方 API 时）")
+    display_name = Column(String(300), nullable=True, comment="平台显示名称")
+    website_url = Column(String(500), nullable=True, comment="平台返回的官网")
+    logo_url = Column(String(500), nullable=True, comment="Logo 地址，可选")
+    location_json = Column(Text, nullable=True, comment="地点 JSON")
+    staff_count_range = Column(String(50), nullable=True, comment="员工规模范围，可选")
+    source = Column(String(30), default="search", comment="来源: search/manual/official_api")
+    confidence = Column(Float, default=0.0, comment="候选置信度 0-100")
+    is_verified = Column(Integer, default=0, comment="用户是否确认: 1是/0否")
+    last_fetched_at = Column(DateTime, nullable=True, comment="最近抓取时间")
+    raw_json = Column(Text, nullable=True, comment="原始 API 结果（脱敏后）")
+    created_by_user_id = Column(Integer, nullable=True, comment="手动新增者用户ID")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, comment="更新时间")
+
+    __table_args__ = (
+        UniqueConstraint("customer_id", "platform", "profile_type", "profile_url",
+                         name="uq_customer_social_profile"),
+    )
 
 
 class User(Base):
@@ -272,6 +341,23 @@ class UserApiConfig(Base):
     )
 
 
+class LinkedInOAuthToken(Base):
+    """LinkedIn OAuth 令牌（V5.1 新增，3-legged 授权）
+
+    每个用户一行。access_token 为敏感字段，使用与 user_api_config
+    相同的 Fernet 加密存储，绝不保存明文。
+    """
+    __tablename__ = "linkedin_oauth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, unique=True, index=True, comment="用户ID（关联 users.id）")
+    access_token_encrypted = Column(Text, nullable=False, comment="access token（Fernet 加密存储）")
+    scope = Column(String(255), nullable=True, comment="授权 scope")
+    expires_at = Column(DateTime, nullable=True, comment="token 过期时间")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, comment="更新时间")
+
+
 def get_db():
     """获取数据库会话的生成器函数"""
     db = SessionLocal()
@@ -305,6 +391,10 @@ def _ensure_indexes(engine):
         "idx_customers_geocode_status": "CREATE INDEX IF NOT EXISTS idx_customers_geocode_status ON customers(geocode_status)",
         "idx_geocode_cache_key": "CREATE INDEX IF NOT EXISTS idx_geocode_cache_key ON geocode_cache(query_key)",
         "idx_customers_map_query": "CREATE INDEX IF NOT EXISTS idx_customers_map_query ON customers(geocode_status, country)",
+        "idx_customer_emails_customer_id": "CREATE INDEX IF NOT EXISTS idx_customer_emails_customer_id ON customer_emails(customer_id)",
+        "idx_customer_emails_email": "CREATE INDEX IF NOT EXISTS idx_customer_emails_email ON customer_emails(email)",
+        "idx_customer_emails_domain": "CREATE INDEX IF NOT EXISTS idx_customer_emails_domain ON customer_emails(domain)",
+        "idx_social_profiles_customer": "CREATE INDEX IF NOT EXISTS idx_social_profiles_customer ON customer_social_profiles(customer_id, platform)",
     }
     with engine.connect() as conn:
         for name, ddl in indexes.items():
@@ -351,6 +441,36 @@ def init_db():
     _migrate_add_column(engine, "users", "ai_analysis_enabled", "INTEGER DEFAULT 1")
     _migrate_add_column(engine, "users", "email_finding_enabled", "INTEGER DEFAULT 1")
 
+    # V5.0 新增：邮箱规范化迁移（从 JSON 到独立表）
+    _migrate_email_normalization(engine)
+
+    # V5.1 新增：CustomerEmail 结构化字段（本地部分/域名/备注/来源详情等）
+    _migrate_add_column(engine, "customer_emails", "local_part", "VARCHAR(255)")
+    _migrate_add_column(engine, "customer_emails", "domain", "VARCHAR(255)")
+    _migrate_add_column(engine, "customer_emails", "source_detail", "VARCHAR(255)")
+    _migrate_add_column(engine, "customer_emails", "notes", "TEXT")
+    _migrate_add_column(engine, "customer_emails", "created_by_user_id", "INTEGER")
+    _migrate_add_column(engine, "customer_emails", "updated_at", "DATETIME")
+
+    # V5.1 新增：CustomerSocialProfile 结构化字段（LinkedIn 公司主页）
+    _migrate_add_column(engine, "customer_social_profiles", "platform", "VARCHAR(30) DEFAULT 'linkedin'")
+    _migrate_add_column(engine, "customer_social_profiles", "profile_type", "VARCHAR(30) DEFAULT 'company'")
+    _migrate_add_column(engine, "customer_social_profiles", "profile_url", "VARCHAR(500)")
+    _migrate_add_column(engine, "customer_social_profiles", "vanity_name", "VARCHAR(200)")
+    _migrate_add_column(engine, "customer_social_profiles", "external_id", "VARCHAR(200)")
+    _migrate_add_column(engine, "customer_social_profiles", "display_name", "VARCHAR(300)")
+    _migrate_add_column(engine, "customer_social_profiles", "website_url", "VARCHAR(500)")
+    _migrate_add_column(engine, "customer_social_profiles", "logo_url", "VARCHAR(500)")
+    _migrate_add_column(engine, "customer_social_profiles", "location_json", "TEXT")
+    _migrate_add_column(engine, "customer_social_profiles", "staff_count_range", "VARCHAR(50)")
+    _migrate_add_column(engine, "customer_social_profiles", "source", "VARCHAR(30) DEFAULT 'search'")
+    _migrate_add_column(engine, "customer_social_profiles", "confidence", "FLOAT DEFAULT 0")
+    _migrate_add_column(engine, "customer_social_profiles", "is_verified", "INTEGER DEFAULT 0")
+    _migrate_add_column(engine, "customer_social_profiles", "last_fetched_at", "DATETIME")
+    _migrate_add_column(engine, "customer_social_profiles", "raw_json", "TEXT")
+    _migrate_add_column(engine, "customer_social_profiles", "created_by_user_id", "INTEGER")
+    _migrate_add_column(engine, "customer_social_profiles", "updated_at", "DATETIME")
+
 
 def _migrate_add_column(engine, table: str, column: str, col_type: str):
     """
@@ -369,3 +489,60 @@ def _migrate_add_column(engine, table: str, column: str, col_type: str):
                 print(f"  数据库迁移: {table}.{column} 列已添加")
     except Exception as e:
         print(f"  数据库迁移跳过 {table}.{column}: {e}")
+
+
+def _migrate_email_normalization(engine):
+    """
+    V5.0 迁移：将 customers.emails JSON 规范化到 customer_emails 独立表
+    只在 customer_emails 表为空或不存在时执行（幂等）
+    """
+    import json as _json
+    import sqlalchemy as sa
+    try:
+        inspector = sa.inspect(engine)
+        table_names = inspector.get_table_names()
+        if "customer_emails" not in table_names:
+            return  # 表还未创建，跳过（由 Base.metadata.create_all 处理）
+
+        with engine.connect() as conn:
+            # 检查是否已有数据（避免重复迁移）
+            count = conn.execute(sa.text("SELECT COUNT(*) FROM customer_emails")).scalar()
+            if count > 0:
+                return  # 已迁移过
+
+            # 迁移现有 JSON 邮箱数据
+            rows = conn.execute(sa.text("SELECT id, emails FROM customers WHERE emails IS NOT NULL AND emails != ''")).fetchall()
+            migrated = 0
+            for customer_id, emails_json in rows:
+                try:
+                    email_list = _json.loads(emails_json)
+                    if not isinstance(email_list, list):
+                        continue
+                    for email_addr in email_list:
+                        if not email_addr or not isinstance(email_addr, str):
+                            continue
+                        email_addr = email_addr.strip().lower()
+                        if not email_addr or "@" not in email_addr:
+                            continue
+                        conn.execute(
+                            sa.text(
+                                "INSERT INTO customer_emails (customer_id, email, source, is_primary, created_at) "
+                                "VALUES (:cid, :email, :source, :primary, :now)"
+                            ),
+                            {
+                                "cid": customer_id,
+                                "email": email_addr,
+                                "source": "migrated",
+                                "primary": 1 if email_list.index(email_addr) == 0 else 0,
+                                "now": datetime.datetime.utcnow(),
+                            },
+                        )
+                        migrated += 1
+                except (_json.JSONDecodeError, TypeError):
+                    continue
+
+            conn.commit()
+            if migrated > 0:
+                print(f"  数据库迁移: 已迁移 {migrated} 个邮箱到 customer_emails 表")
+    except Exception as e:
+        print(f"  数据库迁移跳过 email_normalization: {e}")

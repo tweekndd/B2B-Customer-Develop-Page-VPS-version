@@ -10,6 +10,7 @@ AI 外贸开发信生成服务（V4.6 新增）
 4. 统一 LLM 接口调用（app.llm.manager），自动 Fallback + 重试
 """
 import json
+import re
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -18,6 +19,17 @@ from app.llm.utils import extract_json
 from app.services.country_language_map import get_language_info
 
 logger = logging.getLogger("email_composer")
+
+
+def _sanitize_input(text: str, max_length: int = 500) -> str:
+    """清理用户输入：移除控制字符，限制长度，防提示注入"""
+    if not text:
+        return ""
+    # 移除 Unicode 控制字符（保留换行和制表符）
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    # 移除可能的提示注入模式
+    text = re.sub(r'(?i)(ignore|disregard|forget)\s+(previous|all|above|earlier)', '[redacted]', text)
+    return text[:max_length].strip()
 
 SYSTEM_PROMPT = (
     "你是一位专业的外贸开发信（cold email）撰写专家，擅长针对 B2B 海外买家撰写高回复率的开发信。"
@@ -117,25 +129,25 @@ def _build_prompt(
     needs = "、".join(needs_identified) if needs_identified else ""
     project_info = identified_projects or ""
 
-    ctx_lines = [f"公司名称：{company_name}"]
+    ctx_lines = [f"公司名称：{_sanitize_input(company_name)}"]
     if country:
-        ctx_lines.append(f"所在国家：{country}")
+        ctx_lines.append(f"所在国家：{_sanitize_input(country, 50)}")
     if company_type:
-        ctx_lines.append(f"公司类型：{company_type}")
+        ctx_lines.append(f"公司类型：{_sanitize_input(company_type, 50)}")
     if product_match:
-        ctx_lines.append(f"对方可能需要的产品：{product_match}")
+        ctx_lines.append(f"对方可能需要的产品：{_sanitize_input(product_match, 200)}")
     if needs:
-        ctx_lines.append(f"对方潜在需求：{needs}")
+        ctx_lines.append(f"对方潜在需求：{_sanitize_input(needs, 200)}")
     if ai_summary:
-        ctx_lines.append(f"公司简介：{ai_summary}")
+        ctx_lines.append(f"公司简介：{_sanitize_input(ai_summary, 500)}")
     if sales_hook:
-        ctx_lines.append(f"开发切入点：{sales_hook}")
+        ctx_lines.append(f"开发切入点：{_sanitize_input(sales_hook, 200)}")
     if project_info:
-        ctx_lines.append(f"项目信息：{project_info}")
+        ctx_lines.append(f"项目信息：{_sanitize_input(project_info, 300)}")
     if target_position:
-        ctx_lines.append(f"建议联系职位：{target_position}")
+        ctx_lines.append(f"建议联系职位：{_sanitize_input(target_position, 100)}")
     if extra_context:
-        ctx_lines.append(f"补充信息：{extra_context}")
+        ctx_lines.append(f"补充信息：{_sanitize_input(extra_context, 500)}")
     ctx_text = "\n".join(ctx_lines)
 
     prompt = f"""请用{language}为下面的潜在买家撰写一封专业的外贸开发信（cold email）。

@@ -2,6 +2,8 @@
    AI Trade Customer Analyzer V4.6 - 地理分布地图页
    修复: !lat 排除赤道、主题切换瓦片不变、标记叠加 jitter
    ============================================ */
+(function() {
+'use strict';
 
 // ── 工具函数 ──
 function debounce(fn, delay) {
@@ -332,3 +334,6 @@ window.addEventListener('beforeunload', function() {
 // debounce 后的 loadMapData，供筛选器 onchange 调用避免频繁请求
 const loadMapDataDebounced = debounce(loadMapData, 300);
 window.loadMapDataDebounced = loadMapDataDebounced;
+window.runGeocode = runGeocode;
+
+})();

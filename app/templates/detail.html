@@ -279,12 +279,32 @@
             </div>
         </div>
 
-        <!-- 邮箱 -->
+        <!-- 邮箱（V5.1：结构化维护：列表 + 手动新增 + 来源/验证状态） -->
         <div class="col-md-6" data-animate data-delay="300">
             <div class="card border-0 h-100">
-                <div class="card-header"><i class="bi bi-envelope-fill"></i> 提取邮箱</div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-envelope-fill"></i> 邮箱联系人</span>
+                    <button class="btn btn-sm btn-outline-secondary" id="btnMergeLegacy" onclick="mergeLegacyEmails()" title="把旧版 JSON 邮箱字段合并到新邮箱表" style="display:none">
+                        <i class="bi bi-arrow-repeat me-1"></i>合并旧邮箱
+                    </button>
+                </div>
                 <div class="card-body" id="emailsContainer">
                     <p class="text-muted small mb-0">暂无邮箱数据</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- LinkedIn 公司主页（V5.1：候选发现 + 用户确认） -->
+        <div class="col-md-6" data-animate data-delay="300">
+            <div class="card border-0 h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-linkedin"></i> LinkedIn 公司主页</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="discoverLinkedin()" id="btnDiscoverLinkedin" title="通过搜索引擎查找候选主页">
+                        <i class="bi bi-search me-1"></i>查找候选
+                    </button>
+                </div>
+                <div class="card-body" id="linkedinContainer">
+                    <p class="text-muted small mb-0">暂无 LinkedIn 主页数据</p>
                 </div>
             </div>
         </div>

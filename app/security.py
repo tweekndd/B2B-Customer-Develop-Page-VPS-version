@@ -158,8 +158,26 @@ def get_rate_limit_group(path: str) -> tuple[int, int, int]:
 
 
 def client_ip(request) -> str:
-    """获取真实客户端 IP（Nginx 反代后取 X-Forwarded-For 首段）"""
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """获取真实客户端 IP（Nginx 反代后取 X-Forwarded-For 首段）
+
+    安全说明：X-Forwarded-For 可被客户端伪造。仅当请求来自受信任的反向代理时使用。
+    如果未配置受信任代理列表，回退到 request.client.host（不可伪造）。
+    """
+    # 受信任的反向代理 IP 列表（可通过环境变量 TRUSTED_PROXIES 配置，逗号分隔）
+    import os
+    trusted_proxies = os.environ.get("TRUSTED_PROXIES", "").split(",")
+    trusted_proxies = [p.strip() for p in trusted_proxies if p.strip()]
+
+    client_host = request.client.host if request.client else "unknown"
+
+    # 如果未配置受信任代理，直接使用客户端 IP（安全）
+    if not trusted_proxies:
+        return client_host
+
+    # 如果客户端 IP 是受信任代理，才使用 XFF
+    if client_host in trusted_proxies:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            return xff.split(",")[0].strip()
+
+    return client_host

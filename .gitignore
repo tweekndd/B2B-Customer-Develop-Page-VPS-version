@@ -29,6 +29,8 @@ settings.local.json
 *.sqlite3
 *.sqlite3-journal
 *.sqlite3-wal
+*.bak
+*.before_restore.bak
 
 # Test
 .pytest_cache/

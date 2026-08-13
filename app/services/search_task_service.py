@@ -3,11 +3,13 @@
 管理客户发现任务的整个生命周期：
 关键词扩展 -> 缓存检查 -> Google搜索 -> 过滤 -> 标准化 -> 去重 -> 自动分析 -> 保存
 支持断点续跑、失败重试
+V5.0：添加并发处理（Semaphore 限制并发数，加速分析流程）
 """
 import json
 import datetime
 import asyncio
 import logging
+import os
 from typing import Optional, List, Dict
 from sqlalchemy.orm import Session
 
@@ -30,9 +32,14 @@ from app.services.email_extractor import extract_emails_from_text
 from app.services.keyword_analyzer import analyze_keywords
 from app.services.glm_analyzer import analyze_company, generate_summary, get_buyer_intent_score, get_price_inquiry
 from app.services.scoring_engine import calculate_scores
+from app.services.customer_email_service import bulk_upsert_customer_emails
 from app.services.deduplication import find_existing_customer, normalize_company_name
 
 logger = logging.getLogger("search_task")
+
+# ── 并发控制 ──
+# 每个关键词内同时处理的公司数量（避免 API 限流和内存暴涨）
+_CONCURRENCY_LIMIT = int(os.environ.get("SEARCH_CONCURRENCY_LIMIT", "5"))
 # ── 任务停止控制 ──
 # _task_stop_flags: 按 search_task.id 独立控制每个搜索任务的停止
 # _batch_stop_flag: 控制客户列表页的「停止分析」（批量 AI 分析）
@@ -99,7 +106,6 @@ async def run_search_task(task_id: int):
 
         # 更新状态为Running
         task.status = "Running"
-        db.commit()
 
         # Round 3：读取任务所属用户，用于解析该用户自有 API Key
         user_id = task.user_id
@@ -129,13 +135,12 @@ async def run_search_task(task_id: int):
             task.expanded_keywords = json.dumps(expanded_keywords, ensure_ascii=False)
             _append_task_log(task, "success", f"AI扩展关键词完成，共 {len(expanded_keywords)} 个")
             db.commit()
-            logger.info(f"关键词扩展完成，共 {len(expanded_keywords)} 个")
 
         # 步骤2：从断点处继续
         start_index = task.current_keyword_index
 
         for idx in range(start_index, len(expanded_keywords)):
-            # 检查停止标记
+            # 检查停止标记（关键词级别）
             if should_stop(task_id):
                 logger.info(f"任务 {task_id} 被用户停止")
                 _append_task_log(task, "warning", f"用户停止任务（已处理 {idx}/{len(expanded_keywords)} 个关键词）")
@@ -152,9 +157,8 @@ async def run_search_task(task_id: int):
             keyword = expanded_keywords[idx]
             logger.info(f"[{idx+1}/{len(expanded_keywords)}] 搜索关键词: {keyword}")
             _append_task_log(task, "info", f"[{idx+1}/{len(expanded_keywords)}] 搜索: {keyword}")
-            db.commit()
 
-            # 更新当前进度
+            # 更新当前进度（合并提交）
             task.current_keyword_index = idx
             task.status = "Running"
             db.commit()
@@ -186,7 +190,6 @@ async def run_search_task(task_id: int):
                 save_search_cache(db, keyword, task.country, search_results)
                 _append_task_log(task, "success", f"搜索完成: 「{keyword}」({len(search_results)}条)")
                 db.commit()
-                logger.info(f"Google搜索完成: {keyword} ({len(search_results)}条)")
 
             # 步骤5：过滤非企业官网
             filtered_results = filter_search_results(search_results)
@@ -196,69 +199,85 @@ async def run_search_task(task_id: int):
                 _append_task_log(task, "info", f"过滤非企业官网: {total} → {remaining}条有效")
             else:
                 _append_task_log(task, "info", f"搜索结果: {remaining}条有效")
-            db.commit()
             logger.info(f"过滤后剩余: {remaining}/{total}条")
 
             task.found_websites = (task.found_websites or 0) + len(filtered_results)
 
-            # 步骤6：遍历每个搜索结果
-            for result in filtered_results:
-                # 检查停止标记
-                if should_stop(task_id):
-                    _append_task_log(task, "warning", f"用户停止，当前处理到第 {idx+1}/{len(expanded_keywords)} 个关键词")
-                    task.status = "Paused"
-                    task.current_keyword_index = idx
-                    db.commit()
-                    return
+            # 步骤6：并发遍历每个搜索结果
+            semaphore = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+            async def _process_result(result: dict, sem: asyncio.Semaphore):
+                """并发处理单个搜索结果（去重 + 分析）"""
+                async with sem:
+                    # 检查停止标记
+                    if should_stop(task_id):
+                        return None
 
-                raw_url = result.get("website", "")
-                if not raw_url:
-                    continue
+                    raw_url = result.get("website", "")
+                    if not raw_url:
+                        return None
 
-                # 网址标准化
-                domain = normalize_url(raw_url)
+                    # 网址标准化
+                    domain = normalize_url(raw_url)
 
-                # 二次检查黑名单
-                if is_blacklisted(domain):
-                    continue
+                    # 二次检查黑名单
+                    if is_blacklisted(domain):
+                        return None
 
-                # 检查数据库是否已存在相同客户（域名 + 公司名双重去重）
-                company_title = result.get("title", "") or result.get("name", "")
-                existing = find_existing_customer(db, domain, company_title)
+                    # 检查数据库是否已存在相同客户（域名 + 公司名双重去重）
+                    company_title = result.get("title", "") or result.get("name", "")
 
-                if existing:
-                    # 合并发现关键词
-                    old_kw = existing.discovery_keyword or ""
-                    if keyword and keyword not in old_kw:
-                        existing.discovery_keyword = f"{old_kw}, {keyword}" if old_kw else keyword
-                    now = datetime.datetime.utcnow()
-                    if existing.first_found_at is None or now < existing.first_found_at:
-                        existing.first_found_at = now
-                    db.commit()
-                    logger.info(f"跳过已存在的公司（合并关键词）: {domain}")
-                    _append_task_log(task, "info", f"跳过重复: {domain}（合并关键词）")
-                    db.commit()
-                    task.analyzed_companies = (task.analyzed_companies or 0) + 1
-                    continue
+                    # 每个并发任务使用独立的 DB session
+                    task_db = SessionLocal()
+                    try:
+                        existing = find_existing_customer(task_db, domain, company_title)
+                        if existing:
+                            # 合并发现关键词
+                            old_kw = existing.discovery_keyword or ""
+                            if keyword and keyword not in old_kw:
+                                existing.discovery_keyword = f"{old_kw}, {keyword}" if old_kw else keyword
+                            now = datetime.datetime.utcnow()
+                            if existing.first_found_at is None or now < existing.first_found_at:
+                                existing.first_found_at = now
+                            task_db.commit()
+                            return {"type": "duplicate", "domain": domain}
 
-                # 自动进入V1分析流程
-                try:
-                    await _auto_analyze_and_save(
-                        db=db,
-                        domain=domain,
-                        country=task.country,
-                        discovery_keyword=keyword,
-                        title=result.get("title", ""),
-                        task_id=task_id,
-                        user_id=user_id,
-                    )
-                    task.new_companies = (task.new_companies or 0) + 1
-                    task.analyzed_companies = (task.analyzed_companies or 0) + 1
-                except Exception as e:
-                    logger.error(f"分析失败 {domain}: {str(e)[:100]}")
-                    _append_task_log(task, "error", f"分析失败: {domain} — {str(e)[:80]}")
-                    db.commit()
-                    continue
+                        # 自动进入V1分析流程
+                        await _auto_analyze_and_save(
+                            db=task_db,
+                            domain=domain,
+                            country=task.country,
+                            discovery_keyword=keyword,
+                            title=result.get("title", ""),
+                            task_id=task_id,
+                            user_id=user_id,
+                        )
+                        return {"type": "new", "domain": domain}
+                    except Exception as e:
+                        logger.error(f"分析失败 {domain}: {str(e)[:100]}")
+                        return {"type": "error", "domain": domain, "error": str(e)[:80]}
+                    finally:
+                        task_db.close()
+
+            # 并发执行所有结果处理
+            tasks = [_process_result(r, semaphore) for r in filtered_results]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 汇总统计
+            new_count = sum(1 for r in results if isinstance(r, dict) and r.get("type") == "new")
+            dup_count = sum(1 for r in results if isinstance(r, dict) and r.get("type") == "duplicate")
+            error_count = sum(1 for r in results if isinstance(r, dict) and r.get("type") == "error")
+            exception_count = sum(1 for r in results if isinstance(r, Exception))
+
+            task.new_companies = (task.new_companies or 0) + new_count
+            task.analyzed_companies = (task.analyzed_companies or 0) + len(filtered_results)
+
+            if error_count > 0 or exception_count > 0:
+                _append_task_log(task, "warning",
+                    f"关键词「{keyword}」完成: {new_count}新增, {dup_count}重复, {error_count + exception_count}失败")
+            else:
+                _append_task_log(task, "success",
+                    f"关键词「{keyword}」完成: {new_count}新增, {dup_count}重复")
+            db.commit()
 
         # 任务完成
         task.status = "Completed"
@@ -318,7 +337,7 @@ async def _auto_analyze_and_save(
         logger.info(f"跳过重复客户（已存在）: {domain} / {title[:40]}")
         return
 
-    # 创建新客户记录
+    # 创建新客户记录（并发安全：捕获唯一约束冲突）
     customer = Customer(
         company_name=title[:255] if title else domain,
         website=domain,
@@ -330,7 +349,13 @@ async def _auto_analyze_and_save(
         created_at=now,
     )
     db.add(customer)
-    db.flush()  # 获取id
+    try:
+        db.flush()  # 获取id
+    except Exception as e:
+        # 并发场景下可能触发唯一约束冲突（另一个任务已创建同域名客户）
+        db.rollback()
+        logger.info(f"并发去重: {domain} 已被其他任务创建，跳过")
+        return
 
     # 步骤1：官网抓取（检查缓存）
     cached_website = get_website_cache(db, domain)
@@ -368,10 +393,10 @@ async def _auto_analyze_and_save(
             db.commit()
             return
 
-        # 步骤2：邮箱提取
+        # 步骤2：邮箱提取（V5.1：写入 CustomerEmail 表并同步 JSON 视图）
         emails = extract_emails_from_text(website_text)
         email_list = list(set(emails))
-        customer.emails = json.dumps(email_list, ensure_ascii=False)
+        bulk_upsert_customer_emails(db, customer.id, email_list, source="website")
 
         # 步骤3：关键词分析
         pos_hits, neg_hits = analyze_keywords(website_text)
