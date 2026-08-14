@@ -44,10 +44,21 @@ async function refreshStatus() {
 }
 
 // ─── 导出 ───
+function toggleExportMode() {
+    const info = document.getElementById('exportInfo');
+    if (document.getElementById('fullExport').checked) {
+        info.textContent = '完整导出模式：文件可能达几十 MB，导入时容易超时';
+    } else {
+        info.textContent = '';
+    }
+}
+
 async function doExport() {
     const btn = document.getElementById('btnExport');
     const info = document.getElementById('exportInfo');
     const result = document.getElementById('exportResult');
+
+    const fullMode = document.getElementById('fullExport').checked;
 
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 正在导出...';
@@ -55,7 +66,7 @@ async function doExport() {
     result.style.display = 'none';
 
     try {
-        const resp = await fetch('/api/sync/export');
+        const resp = await fetch('/api/sync/export' + (fullMode ? '?mode=full' : ''));
         if (!resp.ok) throw new Error(`服务器错误: ${resp.status}`);
 
         const data = await resp.json();
@@ -83,6 +94,7 @@ async function doExport() {
             共 <strong>${stats.customers ?? 0}</strong> 个客户，
             <strong>${stats.search_tasks ?? 0}</strong> 个搜索任务，
             缓存 ${(stats.search_cache ?? 0) + (stats.website_cache ?? 0) + (stats.analysis_cache ?? 0)} 条
+            ${stats.truncated_cache ? '<br><small class="text-secondary">已使用瘦身模式（缓存限量、不含官网原文），导入更快</small>' : ''}
         `;
         result.style.display = 'block';
         info.textContent = `${(blob.size / 1024).toFixed(1)} KB`;
@@ -133,7 +145,9 @@ async function doImport(input) {
             `  · 客户: ${stats.customers ?? 0} 个\n` +
             `  · 搜索任务: ${stats.search_tasks ?? 0} 个\n` +
             `  · 缓存数据: ${(stats.search_cache ?? 0) + (stats.website_cache ?? 0) + (stats.analysis_cache ?? 0)} 条\n\n` +
-            `已存在的客户会自动跳过，不会重复创建。\n确定继续吗？`;
+            `文件大小: ${(file.size / 1024 / 1024).toFixed(1)} MB\n\n` +
+            `已存在的客户会自动跳过，不会重复创建。\n` +
+            `（大文件导入可能需要 1-3 分钟，请耐心等待）\n确定继续吗？`;
 
         if (!confirm(confirmMsg)) {
             result.className = 'results-box';

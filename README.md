@@ -58,6 +58,7 @@
 | **LinkedIn 公司页发现 V5.1** | 搜索引擎候选发现（`site:linkedin.com/company`，复用运行时切换引擎）→ 候选评分 → 人工确认，支持手动粘贴 URL |
 | **LinkedIn 官方 API V5.1** | OAuth 2.0 授权（设置页配置 Client ID / Secret）→ Organizations Lookup API（`?q=vanityName`）刷新组织详情：名称/Logo/地点/员工规模/官网 |
 | **自有邮箱发信检测 V5.2** | 授权 Gmail（只读 `gmail.readonly`，最小权限）→ 增量扫描已发送邮件 → 严格主域匹配客户（防反向包含）→ 详情页展示发信记录（主题/时间/收件人/发件邮箱），支持 Pub/Sub 推送 + 轮询补偿双模式 |
+| **主表大字段瘦身 V5.3** | `website_text` / `ai_raw_json` 停止写入主表，由快照表承接并展示历史版本；sync 导出 standard 模式排除大字段 + 快照表同步；组合索引 + 周期缓存清理 |
 | **相似客户扩展** | 输入公司网址 + 目标国家，自动搜索相似客户，支持多语言本地化搜索 |
 | **客户地理分布地图** | Leaflet.js 地图可视化：城市级定位 + MarkerCluster 聚合 + 暗色/亮色主题自适应 |
 | **智能去重** | 域名 + 标准化公司名双重去重，自动合并重复发现的关键词 |
@@ -550,8 +551,21 @@ AI-Trade-Customer-Analyzer/
 ├── searxng/
 │   └── settings.yml                  # SearXNG 配置
 ├── app/
-│   ├── database.py                   # 12 张数据表
-│   ├── auth.py                       # 认证与权限 (V4.6)
+│   ├── core/
+│   │   ├── database.py                 # Engine/Session/Base（V5.3 拆出）
+│   │   ├── db_migrations.py            # init_db + 自动迁移（V5.3 拆出）
+│   │   └── backfill_intelligence.py    # 智能分析快照回填脚本（V5.3，幂等）
+│   ├── models/                         # ORM 模型（V5.3 按业务域拆分）
+│   │   ├── crm.py                      # Customer / CustomerEmail
+│   │   ├── intelligence.py             # WebsiteSnapshot / AnalysisRun / ScoreSnapshot（V5.3）
+│   │   ├── discovery.py                # SearchTask / SearchCache
+│   │   ├── enrichment.py               # 抓取/AI/邮箱缓存 + 配额日志
+│   │   ├── social.py                   # CustomerSocialProfile
+│   │   ├── outreach.py                 # MailAccount / CustomerEmailActivity
+│   │   ├── identity.py                 # User / UserApiConfig / LinkedInOAuthToken
+│   │   └── cache.py                    # GeocodeCache
+│   ├── database.py                     # 兼容层（re-export，V5.3 保留旧导入路径）
+│   ├── auth.py                         # 认证与权限 (V4.6)
 │   ├── api/
 │   │   ├── customers.py              # 客户 CRUD / 分析 / 导入导出 / 开发信
 │   │   ├── discovery.py              # 搜索任务 / 关键词扩展 / 相似客户
@@ -572,7 +586,8 @@ AI-Trade-Customer-Analyzer/
 │   │   ├── customer_email_service.py # 邮箱结构化统一服务（V5.1）
 │   │   ├── linkedin_service.py       # LinkedIn 公司页候选发现（V5.1）
 │   │   ├── linkedin_oauth_service.py # LinkedIn OAuth + Lookup API（V5.1）
-│   │   ├── gmail_service.py          # Gmail OAuth/watch/history/解析（V5.2）
+│   │   ├── intelligence_service.py     # 快照/AI运行/评分历史（V5.3）
+│   │   ├── gmail_service.py            # Gmail OAuth/watch/history/解析（V5.2）
 │   │   ├── mail_sync_service.py      # 发信检测同步编排（V5.2）
 │   │   ├── mail_account_service.py   # 邮箱账户绑定/状态（V5.2）
 │   │   ├── email_domain_matcher.py   # 域名匹配器（V5.2）
@@ -602,7 +617,7 @@ AI-Trade-Customer-Analyzer/
 │   ├── static/js/                    # JS 模块（含 settings.js 设置页）
 │   ├── templates/                    # HTML 模板（含 settings.html / filemanager.html）
 │   └── filemanager.py                # VPS 文件管理器（仅管理员）
-└── tests/                            # 378 个测试用例
+└── tests/                            # 406 个测试用例
 ```
 
 ---
@@ -628,6 +643,9 @@ AI-Trade-Customer-Analyzer/
 | `linkedin_oauth_tokens` | LinkedIn OAuth token（V5.1：user_id 唯一，加密存储 + 过期时间） |
 | `mail_accounts` | 自有邮箱账户（V5.2：Gmail token/refresh/游标/状态，加密存储） |
 | `customer_email_activities` | 客户发信记录（V5.2：域名匹配结果，幂等唯一约束） |
+| `website_snapshots` | 官网抓取快照（V5.3：内容哈希去重，历史可追溯） |
+| `analysis_runs` | AI 分析运行记录（V5.3：失败也记录，不覆盖历史成功） |
+| `score_snapshots` | 评分快照（V5.3：规则变更后可追溯，关联分析运行） |
 
 > **用户级 API Key**：`user_api_config` 表按「用户 + 服务」唯一存储各用户自己的 Key，加密密钥来自 `API_CONFIG_ENCRYPTION_KEY` 环境变量（未设置时自动生成并持久化到 `app/.config_encryption_key`，该文件已被 gitignore）。
 
@@ -666,7 +684,7 @@ AI-Trade-Customer-Analyzer/
 | **爬虫** | httpx + BeautifulSoup（异步并发）· Jina AI Reader 免费降级 |
 | **地图** | Leaflet.js + MarkerCluster + Nominatim |
 | **部署** | Docker · Docker Compose · Nginx · Let's Encrypt |
-| **测试** | pytest（378 测试用例：纯逻辑单元 + API 集成） |
+| **测试** | pytest（406 测试用例：纯逻辑单元 + API 集成） |
 | **缓存** | 本地 SQLite 多级缓存（搜索 / 官网 / AI 分析 / 邮箱 / 地理编码） |
 | **认证** | Session + bcrypt · 多用户 · 逐用户配额管控 |
 
@@ -676,7 +694,7 @@ AI-Trade-Customer-Analyzer/
 
 ```bash
 source venv/bin/activate
-pytest tests/ -v     # 378 测试，详细输出
+pytest tests/ -v     # 406 测试，详细输出
 pytest tests/ -q     # 简洁输出
 ```
 
@@ -687,5 +705,9 @@ pytest tests/ -q     # 简洁输出
 **© 2026 AI Customer Development System** · Apache-2.0 License · [GitHub](https://github.com/tweekndd/B2B-Customer-Develop-Page-VPS-version)
 
 </div>
+
+
+
+
 
 

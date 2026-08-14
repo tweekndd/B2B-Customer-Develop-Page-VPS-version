@@ -33,9 +33,24 @@ from app.services.keyword_analyzer import analyze_keywords
 from app.services.glm_analyzer import analyze_company, generate_summary, get_buyer_intent_score, get_price_inquiry
 from app.services.scoring_engine import calculate_scores
 from app.services.customer_email_service import bulk_upsert_customer_emails
+from app.services.intelligence_service import (
+    save_website_snapshot,
+    save_analysis_run,
+    save_score_snapshot,
+)
 from app.services.deduplication import find_existing_customer, normalize_company_name
 
 logger = logging.getLogger("search_task")
+
+
+def _get_llm_provider_name() -> str:
+    """读取当前 LLM Provider 名称（分析运行记录用，失败返回 None）"""
+    try:
+        from app.llm.config import resolve_config
+        cfg = resolve_config()
+        return cfg.provider or None
+    except Exception:
+        return None
 
 # ── 并发控制 ──
 # 每个关键词内同时处理的公司数量（避免 API 限流和内存暴涨）
@@ -384,7 +399,13 @@ async def _auto_analyze_and_save(
             return
 
     if website_text:
-        customer.website_text = website_text
+        # V5.3 阶段3：主表不再保存大字段 website_text（由快照表承接）
+
+        # V5.3 阶段2：保存官网抓取快照（历史可追溯，相同内容自动去重）
+        snapshot = save_website_snapshot(
+            db, customer.id, website_text, website=domain, scrape_status="success"
+        )
+        snapshot_id = snapshot.id if snapshot else None
 
         # 检查停止标记 — 爬取完成后，AI分析前
         if should_stop(task_id):
@@ -431,7 +452,7 @@ async def _auto_analyze_and_save(
                 customer.fail_reason = "AI分析失败（API可能超时）"
 
         if ai_result:
-            customer.ai_raw_json = json.dumps(ai_result, ensure_ascii=False)
+            # V5.3 阶段3：主表不再保存大字段 ai_raw_json（由 analysis_runs.raw_json 承接）
             customer.company_type = ai_result.get("company_type", "")
             customer.sales_hook = ai_result.get("sales_hook", "")
             customer.target_position = ai_result.get("target_position", "")
@@ -445,6 +466,18 @@ async def _auto_analyze_and_save(
                 customer.city = ai_city.strip()
             customer_info = {"country": country, "company_name": title}
             customer.ai_summary = generate_summary(ai_result, customer_info)
+
+        # V5.3 阶段2：保存 AI 分析运行记录（失败也记录）
+        import hashlib as _hashlib
+        _content_hash = _hashlib.md5((website_text or "").encode("utf-8")).hexdigest()[:16]
+        _run = save_analysis_run(
+            db, customer.id, ai_result,
+            website_snapshot_id=snapshot_id,
+            content_hash=_content_hash,
+            provider=_get_llm_provider_name(),
+            status="success" if (customer.ai_status or "success") == "success" else "failed",
+            error_message=None if customer.ai_status == "success" else customer.fail_reason,
+        )
 
         # 步骤5：规则评分
         scores = calculate_scores(
@@ -464,6 +497,9 @@ async def _auto_analyze_and_save(
         customer.contact_score = scores["contact_score"]
         customer.total_score = scores["total_score"]
         customer.priority = scores["priority"]
+
+        # V5.3 阶段2：保存评分快照
+        save_score_snapshot(db, customer.id, scores, analysis_run_id=_run.id if _run else None)
 
     customer.analyzed_at = datetime.datetime.utcnow()
     db.commit()

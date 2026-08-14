@@ -126,7 +126,29 @@ def _save_activity(
         created_at=datetime.datetime.utcnow(),
     )
     db.add(activity)
+
+    # V5.2：检测到发信后自动更新客户跟进状态 + 最近发信时间
+    _update_customer_on_email_sent(db, customer_id, sent_at)
     return True
+
+
+def _update_customer_on_email_sent(
+    db: Session,
+    customer_id: int,
+    sent_at: Optional[datetime.datetime],
+):
+    """检测到发信后更新客户：跟进状态 → 已发邮件，同步发信时间。
+
+    仅当状态为「待联系」或未设置时更新为「已发邮件」（不覆盖已回复/成单等更高级状态）。
+    """
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if customer is None:
+        return
+    if not customer.status or customer.status == "待联系":
+        customer.status = "已发邮件"
+    if sent_at:
+        if not customer.last_email_sent_at or sent_at > customer.last_email_sent_at:
+            customer.last_email_sent_at = sent_at
 
 
 def sync_account(db: Session, account: MailAccount) -> Dict[str, int]:

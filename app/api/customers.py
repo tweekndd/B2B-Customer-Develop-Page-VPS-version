@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case as sql_case
 
-from app.database import get_db, Customer
+from app.database import get_db, Customer, CustomerEmail
 from app.services.excel_importer import parse_excel, import_customers
 from app.services.website_scraper import scrape_website
 from app.services.email_extractor import extract_emails_from_text
@@ -23,6 +23,15 @@ from app.services.scoring_engine import calculate_scores
 from app.services.email_composer import generate_email_draft, load_email_draft
 from app.services.search_task_service import request_stop
 from app.services.customer_email_service import bulk_upsert_customer_emails, upsert_customer_email, get_customer_emails
+from app.services.intelligence_service import (
+    save_website_snapshot,
+    save_analysis_run,
+    save_score_snapshot,
+    get_analysis_summary,
+    get_latest_website_snapshot,
+    list_analysis_runs,
+    list_score_snapshots,
+)
 from app.services.linkedin_service import get_verified_linkedin_url
 from app.auth import check_ai_analysis_permission, require_user
 
@@ -46,6 +55,52 @@ def _get_emails_list(customer: Customer) -> list:
 # ═══════════════════════════════════════════
 # 客户列表 & 详情
 # ═══════════════════════════════════════════
+
+# V5.3：国家列表短 TTL 缓存（避免每次请求全表 distinct）
+_COUNTRY_CACHE_TTL = 300  # 5 分钟
+_country_cache: dict = {"ts": 0.0, "data": []}
+
+
+def _get_country_list(db: Session) -> list:
+    """国家筛选列表（5 分钟 TTL 缓存）"""
+    import time as _time
+    now = _time.monotonic()
+    if now - _country_cache["ts"] < _COUNTRY_CACHE_TTL and _country_cache["data"]:
+        return _country_cache["data"]
+    all_countries = db.query(Customer.country).distinct().filter(
+        Customer.country.isnot(None), Customer.country != ""
+    ).order_by(Customer.country).all()
+    country_list = [c[0] for c in all_countries if c[0]]
+    _country_cache["ts"] = now
+    _country_cache["data"] = country_list
+    return country_list
+
+
+# 列表接口只加载这些列（V5.3：不再加载 website_text/ai_raw_json/关键词 JSON 等大字段）
+_LIST_CUSTOMER_COLUMNS = (
+    Customer.id,
+    Customer.company_name,
+    Customer.website,
+    Customer.country,
+    Customer.total_score,
+    Customer.priority,
+    Customer.ai_summary,
+    Customer.discovery_source,
+    Customer.discovery_keyword,
+    Customer.created_at,
+    Customer.analyzed_at,
+    Customer.status,
+    Customer.follow_up_date,
+    Customer.last_email_sent_at,
+    Customer.scrape_status,
+    Customer.ai_status,
+    Customer.fail_reason,
+    Customer.star_rating,
+    Customer.buyer_intent_score,
+    Customer.is_price_inquiry,
+    Customer.company_type,
+)
+
 
 @router.get("/customers")
 def list_customers(
@@ -78,7 +133,8 @@ def list_customers(
 
     total_count = query.count()
     offset_val = (page - 1) * page_size
-    customers = query.offset(offset_val).limit(page_size).all()
+    # V5.3：显式字段查询（避免加载 website_text / ai_raw_json 等大字段）
+    customers = query.with_entities(*_LIST_CUSTOMER_COLUMNS).offset(offset_val).limit(page_size).all()
 
     # 单次聚合查询替代 5 次独立 COUNT
     agg = db.query(
@@ -94,20 +150,28 @@ def list_customers(
         "google": agg.google or 0,
     }
 
-    all_countries = db.query(Customer.country).distinct().filter(
-        Customer.country.isnot(None), Customer.country != ""
-    ).order_by(Customer.country).all()
-    country_list = [c[0] for c in all_countries if c[0]]
+    # V5.3：邮箱数量从 customer_emails 表一次聚合（替代逐行 JSON 解析）
+    page_ids = [c.id for c in customers]
+    email_counts: dict = {}
+    if page_ids:
+        rows = (
+            db.query(CustomerEmail.customer_id, func.count(CustomerEmail.id))
+            .filter(CustomerEmail.customer_id.in_(page_ids))
+            .group_by(CustomerEmail.customer_id)
+            .all()
+        )
+        email_counts = dict(rows)
+
+    country_list = _get_country_list(db)
 
     result = []
     for c in customers:
-        emails = _get_emails_list(c)
         result.append({
             "id": c.id,
             "company_name": c.company_name,
             "website": c.website or "",
             "country": c.country or "",
-            "email_count": len(emails),
+            "email_count": email_counts.get(c.id, 0),
             "total_score": c.total_score,
             "priority": c.priority or "-",
             "ai_summary": c.ai_summary or "",
@@ -118,6 +182,7 @@ def list_customers(
             "analyzed_at": c.analyzed_at.isoformat() if c.analyzed_at else None,
             "status": c.status or "待联系",
             "follow_up_date": c.follow_up_date.isoformat() if c.follow_up_date else None,
+            "last_email_sent_at": c.last_email_sent_at.isoformat() if c.last_email_sent_at else None,
             "scrape_status": c.scrape_status,
             "ai_status": c.ai_status,
             "fail_reason": c.fail_reason,
@@ -168,6 +233,18 @@ def get_customer_detail(customer_id: int, db: Session = Depends(get_db)):
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # V5.3 阶段3：大字段从快照表读取（回退主表旧字段，兼容老数据）
+    website_text = customer.website_text or ""
+    latest_run = list_analysis_runs(db, customer.id, limit=1)
+    if latest_run and latest_run[0].raw_json and latest_run[0].status == "success":
+        try:
+            ai_raw = json.loads(latest_run[0].raw_json)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    latest_snapshot = get_latest_website_snapshot(db, customer.id)
+    if latest_snapshot and latest_snapshot.content:
+        website_text = latest_snapshot.content
+
     email_draft = {}
     if customer.email_draft:
         try:
@@ -206,7 +283,7 @@ def get_customer_detail(customer_id: int, db: Session = Depends(get_db)):
         "country": customer.country or "",
         "emails": emails,
         "email_records": email_records,
-        "website_text": customer.website_text or "",
+        "website_text": website_text,
         "positive_keywords": positive_kw,
         "negative_keywords": negative_kw,
         "industry_score": customer.industry_score,
@@ -232,10 +309,14 @@ def get_customer_detail(customer_id: int, db: Session = Depends(get_db)):
         "buyer_intent_score": customer.buyer_intent_score,
         "is_price_inquiry": bool(customer.is_price_inquiry),
         "email_draft": email_draft,
+        # V5.3 阶段2：智能分析摘要（快照/分析/评分历史）
+        "intelligence": get_analysis_summary(db, customer.id),
         # V2.2 跟进状态
         "status": customer.status or "待联系",
         "follow_up_date": customer.follow_up_date.isoformat() if customer.follow_up_date else None,
         "notes": customer.notes or "",
+        # V5.2 最近发信时间（Gmail 发信检测自动回填）
+        "last_email_sent_at": customer.last_email_sent_at.isoformat() if customer.last_email_sent_at else None,
         # V2.2 抓取/分析状态
         "scrape_status": customer.scrape_status,
         "ai_status": customer.ai_status,
@@ -295,7 +376,12 @@ async def analyze_single(
         website_text = await scrape_website(customer.website)
         if website_text:
             customer.scrape_status = "success"
-            customer.website_text = website_text
+            # V5.3 阶段3：主表不再保存大字段 website_text（由快照表承接）
+            # V5.3 阶段2：保存官网抓取快照
+            snapshot = save_website_snapshot(
+                db, customer.id, website_text, website=customer.website, scrape_status="success"
+            )
+            snapshot_id = snapshot.id if snapshot else None
             emails = extract_emails_from_text(website_text)
             email_list = list(set(emails))
             bulk_upsert_customer_emails(db, customer.id, email_list, source="website")
@@ -305,7 +391,7 @@ async def analyze_single(
             ai_result = await analyze_company(website_text, user_id=user.id)
             if ai_result:
                 customer.ai_status = "success"
-                customer.ai_raw_json = json.dumps(ai_result, ensure_ascii=False)
+                # V5.3 阶段3：主表不再保存大字段 ai_raw_json（由 analysis_runs.raw_json 承接）
                 customer.company_type = ai_result.get("company_type", "")
                 customer.sales_hook = ai_result.get("sales_hook", "")
                 customer.target_position = ai_result.get("target_position", "")
@@ -322,6 +408,16 @@ async def analyze_single(
             else:
                 customer.ai_status = "failed"
                 customer.fail_reason = "AI分析失败（API可能超时）"
+            # V5.3 阶段2：保存 AI 分析运行记录
+            import hashlib as _hashlib
+            _content_hash = _hashlib.md5((website_text or "").encode("utf-8")).hexdigest()[:16]
+            _run = save_analysis_run(
+                db, customer.id, ai_result,
+                website_snapshot_id=snapshot_id,
+                content_hash=_content_hash,
+                status="success" if customer.ai_status == "success" else "failed",
+                error_message=None if customer.ai_status == "success" else customer.fail_reason,
+            )
             # V5.1：评分使用合并后的全量邮箱（含历史手动/发现邮箱）
             merged_emails = _get_emails_list(customer)
             scores = calculate_scores(
@@ -337,6 +433,8 @@ async def analyze_single(
             customer.contact_score = scores["contact_score"]
             customer.total_score = scores["total_score"]
             customer.priority = scores["priority"]
+            # V5.3 阶段2：保存评分快照
+            save_score_snapshot(db, customer.id, scores, analysis_run_id=_run.id if _run else None)
         customer.analyzed_at = datetime.datetime.utcnow()
         db.commit()
         return {"message": "分析完成", "customer_id": customer.id}
@@ -672,7 +770,11 @@ async def rescrape_customer(customer_id: int, db: Session = Depends(get_db)):
 
         if website_text:
             customer.scrape_status = "success"
-            customer.website_text = website_text
+            # V5.3 阶段3：主表不再保存大字段 website_text（由快照表承接）
+            # V5.3 阶段2：保存官网抓取快照
+            save_website_snapshot(
+                db, customer.id, website_text, website=domain, scrape_status="success"
+            )
             # 重新提取邮箱（增量合并到新表，不覆盖）
             emails = extract_emails_from_text(website_text)
             email_list = list(set(emails))
@@ -694,6 +796,8 @@ async def rescrape_customer(customer_id: int, db: Session = Depends(get_db)):
             customer.contact_score = scores["contact_score"]
             customer.total_score = scores["total_score"]
             customer.priority = scores["priority"]
+            # V5.3 阶段2：保存评分快照（重新抓取不触发 AI，仅评分变化）
+            save_score_snapshot(db, customer.id, scores)
         else:
             customer.scrape_status = "failed"
             customer.fail_reason = "抓取失败（网站可能无法访问）"
@@ -717,21 +821,34 @@ async def reanalyze_customer(
     db: Session = Depends(get_db),
     user=Depends(check_ai_analysis_permission),
 ):
-    """重新AI分析客户（仅重新调用DeepSeek，不重新抓取）"""
+    """重新AI分析客户（仅重新调用LLM，不重新抓取；内容取自最新官网快照）"""
     if customer_id in _analyzing_set:
         raise HTTPException(status_code=400, detail="该客户正在分析中")
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="客户不存在")
-    if not customer.website_text:
+
+    # V5.3 阶段3：官网文本从最新快照读取（回退主表旧字段，兼容老数据）
+    website_text = customer.website_text
+    latest_snapshot = get_latest_website_snapshot(db, customer.id)
+    if latest_snapshot and latest_snapshot.content:
+        website_text = latest_snapshot.content
+    if not website_text:
         raise HTTPException(status_code=400, detail="没有官网内容，请先抓取官网")
 
     _analyzing_set.add(customer_id)
     try:
-        ai_result = await analyze_company(customer.website_text, user_id=user.id)
+        ai_result = await analyze_company(website_text, user_id=user.id)
+        # V5.3 阶段2：保存 AI 分析运行记录（成功/失败均记录，不覆盖历史）
+        _run = save_analysis_run(
+            db, customer.id, ai_result,
+            content_hash=None,
+            status="success" if ai_result else "failed",
+            error_message=None if ai_result else "AI分析失败（API可能超时）",
+        )
         if ai_result:
             customer.ai_status = "success"
-            customer.ai_raw_json = json.dumps(ai_result, ensure_ascii=False)
+            # V5.3 阶段3：主表不再保存大字段 ai_raw_json（由 analysis_runs.raw_json 承接）
             customer.company_type = ai_result.get("company_type", "")
             customer.sales_hook = ai_result.get("sales_hook", "")
             customer.target_position = ai_result.get("target_position", "")
@@ -754,7 +871,7 @@ async def reanalyze_customer(
                     pass
             emails = _get_emails_list(customer)
             scores = calculate_scores(
-                website_text=customer.website_text, positive_keywords=pos_hits,
+                website_text=website_text, positive_keywords=pos_hits,
                 company_type=customer.company_type, country=customer.country, emails=emails,
                 is_price_inquiry=customer.is_price_inquiry == 1,
                 buyer_intent_score=customer.buyer_intent_score,
@@ -766,6 +883,8 @@ async def reanalyze_customer(
             customer.contact_score = scores["contact_score"]
             customer.total_score = scores["total_score"]
             customer.priority = scores["priority"]
+            # V5.3 阶段2：保存评分快照
+            save_score_snapshot(db, customer.id, scores, analysis_run_id=_run.id if _run else None)
         else:
             customer.ai_status = "failed"
             customer.fail_reason = "AI分析失败（API可能超时）"
@@ -787,17 +906,31 @@ async def reanalyze_customer(
 # V4.6：AI 开发信生成（多语种自动检测 + 产品关键词驱动）
 # ═══════════════════════════════════════════
 
-def _get_customer_product_keywords(customer: Customer) -> list:
+def _get_customer_product_keywords(customer: Customer, db: Session = None) -> list:
     """从客户记录中提取产品关键词：
     优先级：discovery_keyword（发现关键词） > AI product_match > 正向关键词命中
+
+    V5.3 阶段3：AI 原始结果优先从最新 analysis_run 读取（回退主表旧字段）。
     """
     keywords = []
     if customer.discovery_keyword:
         keywords.append(customer.discovery_keyword.strip())
-    try:
-        ai_raw = json.loads(customer.ai_raw_json) if customer.ai_raw_json else {}
-    except (json.JSONDecodeError, TypeError):
-        ai_raw = {}
+
+    ai_raw = {}
+    latest_run = None
+    if db is not None:
+        runs = list_analysis_runs(db, customer.id, limit=1)
+        latest_run = runs[0] if runs else None
+    if latest_run and latest_run.raw_json:
+        try:
+            ai_raw = json.loads(latest_run.raw_json)
+        except (json.JSONDecodeError, TypeError):
+            ai_raw = {}
+    if not ai_raw:
+        try:
+            ai_raw = json.loads(customer.ai_raw_json) if customer.ai_raw_json else {}
+        except (json.JSONDecodeError, TypeError):
+            ai_raw = {}
     product_match = ai_raw.get("product_match", "")
     if product_match and product_match not in keywords:
         keywords.append(product_match.strip())
@@ -833,18 +966,26 @@ async def create_email_draft(
     if product_keywords:
         keywords = [k.strip() for k in product_keywords.split(",") if k.strip()]
     else:
-        keywords = _get_customer_product_keywords(customer)
+        keywords = _get_customer_product_keywords(customer, db)
 
     if not keywords:
         raise HTTPException(status_code=400, detail="没有可用的产品关键词，请手动输入产品关键词")
 
-    # 解析 AI 原始结果中的附加信息
+    # 解析 AI 原始结果中的附加信息（V5.3 阶段3：优先取最新 analysis_run）
     needs_identified = []
     product_match = ""
-    try:
-        ai_raw = json.loads(customer.ai_raw_json) if customer.ai_raw_json else {}
-    except (json.JSONDecodeError, TypeError):
-        ai_raw = {}
+    ai_raw = {}
+    latest_run = list_analysis_runs(db, customer.id, limit=1)
+    if latest_run and latest_run[0].raw_json:
+        try:
+            ai_raw = json.loads(latest_run[0].raw_json)
+        except (json.JSONDecodeError, TypeError):
+            ai_raw = {}
+    if not ai_raw:
+        try:
+            ai_raw = json.loads(customer.ai_raw_json) if customer.ai_raw_json else {}
+        except (json.JSONDecodeError, TypeError):
+            ai_raw = {}
     needs_identified = ai_raw.get("needs_identified", []) or []
     product_match = ai_raw.get("product_match", "")
 
@@ -871,3 +1012,68 @@ async def create_email_draft(
     customer.email_draft = json.dumps(draft, ensure_ascii=False)
     db.commit()
     return {"message": "开发信已生成", "customer_id": customer.id, **draft}
+
+
+# ═══════════════════════════════════════════
+# V5.3 阶段2：智能分析历史（官网快照 / AI 运行 / 评分快照）
+# ═══════════════════════════════════════════
+
+def _analysis_run_to_dict(r) -> dict:
+    try:
+        needs = json.loads(r.needs_identified) if r.needs_identified else []
+    except (json.JSONDecodeError, TypeError):
+        needs = []
+    return {
+        "id": r.id,
+        "status": r.status or "success",
+        "model": r.model or "",
+        "provider": r.provider or "",
+        "company_type": r.company_type or "",
+        "summary": r.summary or "",
+        "sales_hook": r.sales_hook or "",
+        "target_position": r.target_position or "",
+        "identified_projects": r.identified_projects or "",
+        "analysis_reason": r.analysis_reason or "",
+        "buyer_intent_score": r.buyer_intent_score,
+        "is_price_inquiry": bool(r.is_price_inquiry),
+        "address_city": r.address_city or "",
+        "needs_identified": needs,
+        "product_match": r.product_match or "",
+        "error_message": r.error_message or "",
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+@router.get("/customers/{customer_id}/intelligence-history")
+def get_intelligence_history(
+    customer_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """获取客户智能分析历史（AI 运行 + 评分快照，倒序）"""
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="客户不存在")
+
+    runs = list_analysis_runs(db, customer_id, limit=limit)
+    scores = list_score_snapshots(db, customer_id, limit=limit)
+    return {
+        "summary": get_analysis_summary(db, customer_id),
+        "analysis_runs": [_analysis_run_to_dict(r) for r in runs],
+        "score_snapshots": [
+            {
+                "id": s.id,
+                "analysis_run_id": s.analysis_run_id,
+                "total_score": s.total_score,
+                "priority": s.priority or "",
+                "industry_score": s.industry_score,
+                "project_score": s.project_score,
+                "company_type_score": s.company_type_score,
+                "country_score": s.country_score,
+                "contact_score": s.contact_score,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in scores
+        ],
+    }

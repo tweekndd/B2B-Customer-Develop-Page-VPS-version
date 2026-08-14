@@ -61,12 +61,19 @@
                     将当前所有客户数据、搜索记录、分析缓存导出为一个 JSON 文件。
                     可用于备份或在另一台电脑上导入。
                 </p>
-                <div class="d-flex align-items-center gap-2 mb-3">
+                <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
                     <button class="btn btn-accent" id="btnExport" onclick="doExport()">
                         <i class="bi bi-download me-1"></i> 导出数据
                     </button>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="fullExport" onchange="toggleExportMode()">
+                        <label class="form-check-label small text-secondary" for="fullExport">完整导出（含官网原文与全部缓存，文件很大）</label>
+                    </div>
                     <span id="exportInfo" style="font-size: 0.85rem; color: var(--text-secondary);"></span>
                 </div>
+                <p class="text-muted small mb-3">
+                    默认「瘦身导出」：客户数据完整保留，缓存数据限量导出且不含官网原文（可重建），文件体积大幅减小，导入不易超时。
+                </p>
                 <div id="exportResult" class="results-box" style="display: none;"></div>
             </div>
         </div>

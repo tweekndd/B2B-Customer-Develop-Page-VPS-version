@@ -1,10 +1,100 @@
 # 更新日志
 
+## v5.3（2026-08-14）
+
+### 🎯 阶段3：Customer 主表大字段彻底瘦身
+
+在阶段2（快照表承接）基础上完成最后阶段的瘦身，Customer 主表不再承载大文本：
+
+- **停写大字段**：分析写入点（搜索管道 + `analyze_single` / `re-scrape` / `re-analyze`）不再更新 `website_text` / `ai_raw_json`（由 `website_snapshots` / `analysis_runs` 承接）；小字段（positive/negative 关键词、评分、ai_summary 等）保留主表
+- **读取切快照表**（回退兼容）：详情接口 `website_text` 优先取最新官网快照、`ai_raw` 优先取最新成功 `analysis_run.raw_json`，无快照时回退主表旧字段（老数据不受影响）；`re-analyze` 分析输入取自最新快照；开发信产品关键词/需求清单同样优先读快照
+- **sync 导出 v2.9**：standard 模式客户记录**不再导出** website_text/ai_raw_json（大字段瘦身）；新增导出 3 张快照表（standard 限量且不含快照原文/原始 JSON，full 完整）；导入按「源 customer_id → 目标 customer_id」映射 + 批量查重幂等导入快照
+- **组合索引**：`customers(country, priority, status)` 筛选组合、`customers(total_score DESC, id)` 排序、`customers(created_at, id)`（启动自动创建）
+- **周期缓存清理**：新增 `cache_cleanup_background.py` 后台任务（默认每 24h 清理过期缓存，`CACHE_CLEANUP_INTERVAL` 可调），数据库文件随运行自动瘦身
+
+**验证**：`pytest tests/` **406 个测试全部通过**（新增 6 个：快照导出/导入/id 映射、幂等、standard 排除大字段、详情快照读取与回退）。
+
+---
+
+### 📊 阶段2：智能分析历史拆表（官网快照 / AI 运行 / 评分快照）
+
+按架构重构文档的六步迁移策略完成**渐进式**拆分（建表 → 写入走 Service → 回填 → 历史查询；Customer 旧字段双写保留，删列延后）：
+
+- **数据库**：新增 3 张快照表（`app/models/intelligence.py`）：
+  - `website_snapshots` — 每次官网抓取一条（内容哈希自动去重，历史可追溯）
+  - `analysis_runs` — 每次 AI 调用一条（**失败也记录，不再覆盖历史成功**；含 provider/model/status/buyer_intent_score/needs_identified/raw_json 等）
+  - `score_snapshots` — 每次评分一条（关联 analysis_run_id，规则变更后可追溯）
+- **统一写入 Service** `app/services/intelligence_service.py`：`save_website_snapshot()`（同内容去重）/ `save_analysis_run()` / `save_score_snapshot()` / `list_analysis_runs()` / `get_analysis_summary()` / `list_score_snapshots()`
+- **写入点改造**（全部走 Service，Customer 旧字段双写保持兼容）：
+  - `search_task_service.py` 搜索管道（抓取→快照、AI→运行记录、评分→快照）
+  - `customers.py` `analyze_single` / `re-scrape` / `re-analyze`
+- **幂等回填脚本** `python -m app.core.backfill_intelligence`（支持 `--dry-run` / `--limit`，可重复运行，已有记录自动跳过）——把历史 `website_text` / `ai_raw_json` / 评分沉淀到新表
+- **详情接口**：返回 `intelligence` 摘要（分析次数/成功失败数/最近分析时间/快照与评分计数）；新增 `GET /api/customers/{id}/intelligence-history`（AI 运行 + 评分快照倒序历史）
+- **前端**：详情页 AI 分析卡片新增「N 次分析」徽标 + 「分析历史」可折叠面板（每次运行的时间/状态/公司类型/摘要/买家意向）
+- **Customer 主表不变**（旧字段继续双写），列表/导出/评分等既有逻辑零回归
+
+**验证**：`pytest tests/` **400 个测试全部通过**（新增 7 个：快照去重、失败记录、评分快照、摘要、回填幂等、历史 API）。
+
+---
+
+### 📦 数据同步瘦身（解决 30MB JSON 导入超时 550）
+
+**问题**：大数据量项目导出 JSON 可达 30MB+（`website_cache.content` 官网原文 + 全量缓存），导入时缓存表**上万条逐条查询查重**，导致服务超时（550/524）。
+
+**导出瘦身**（`app/api/sync.py`，默认 `standard` 模式）：
+- `website_cache` **不再导出官网原文 content**（可重建数据，体积最大头），保留元数据（website/content_hash/last_crawled）
+- 三类缓存（search/website/analysis）各**限量导出最近 N 条**（默认 2000，`SYNC_CACHE_EXPORT_LIMIT` 可调）
+- `?mode=full` 可完整导出（含 content + 全量缓存），导出版本 → `2.8`
+- 客户数据（核心）**全字段保留**，不受影响
+
+**导入提速**（批量查重替代逐条查询）：
+- search_tasks / search_cache / website_cache / analysis_cache 改为**一次 SELECT 全部现有 key → set 过滤 → 批量插入**，消除了上万次逐条 `db.query().first()`
+- 同步页前端：导出卡片新增「完整导出」开关与瘦身说明；导入确认框显示文件体积与耗时提示
+
+**Nginx**：`/api/sync/` 单独放宽读写超时（`proxy_read_timeout 900s`），避免大文件导入被网关超时中断。
+
+**测试**：`tests/test_models_metadata.py` 新增 4 个用例（standard 不含 content/限量、full 含 content、limit 生效、导入批量去重与补回），全量 **393 个测试通过**。
+
+### 🧹 Customer 与 database.py 架构瘦身（模块化单体）
+
+参照架构重构分析文档，完成「零行为变化」的瘦身：**Customer 列表不再加载大字段 + 模型按业务域拆分**。
+
+**列表接口性能优化**（`app/api/customers.py`）：
+- `list_customers` 由全字段 `db.query(Customer)` 改为**显式字段查询**（`with_entities` 21 列），不再加载 `website_text` / `ai_raw_json` / 关键词 JSON 等大文本字段
+- `email_count` 由「逐行解析 emails JSON」改为 **customer_emails 表一次聚合查询**（整页 IN + GROUP BY）
+- 国家筛选列表加 **5 分钟 TTL 缓存**（替代每次请求全表 `distinct country`）
+
+**database.py 按业务域拆分**（表结构与行为零变化，`app/database.py` 保留为兼容 re-export 层，现有 30+ 处 `from app.database import ...` 无需改动）：
+```
+app/core/database.py        # Engine / SessionLocal / Base / get_db（纯基础设施）
+app/core/db_migrations.py   # init_db + 索引 DDL + 自动迁移函数（从 database.py 移入）
+app/models/
+  crm.py                    # Customer、CustomerEmail（含 relationship）
+  discovery.py              # SearchTask、SearchCache
+  enrichment.py             # WebsiteCache / AnalysisCache / HunterCache / TombaCache / ProspeoCache / EmailQuotaLog
+  social.py                 # CustomerSocialProfile
+  outreach.py               # MailAccount、CustomerEmailActivity
+  identity.py               # User、UserApiConfig、LinkedInOAuthToken
+  cache.py                  # GeocodeCache
+  __init__.py               # 显式导入全部模型（保证 Base.metadata 17 张表完整注册）+ init_db
+```
+
+**新增测试** `tests/test_models_metadata.py`（10 个用例）：
+- `Base.metadata` 必须恰好包含全部 17 张表（防拆分后漏注册）
+- 新旧导入路径（`app.models` / `app.database`）完整性
+- 列表瘦身行为回归：email_count 表聚合、国家缓存、筛选/排序/搜索/分页
+
+**验证**：`pytest tests/` **389 个测试全部通过**；`python main.py` 启动冒烟 HTTP 200，旧库自动迁移正常。
+
+---
+
 ## v5.2（2026-08-14）
 
 ### 📧 自有邮箱发信检测（Gmail）
 
 按方案文档第三期实现：用户授权自己的 Gmail 后，系统只读扫描「已发送」邮件，按收件人域名自动匹配客户，详情页展示发信记录（主题/时间/收件人/发件邮箱）。
+
+**跟进状态自动联动**：检测到发往客户的邮件后，系统自动将客户跟进状态更新为「已发邮件」，并新增 `customers.last_email_sent_at`「最近发信时间」字段，同步邮件实际发送时间（取最近一封）；客户已是「已回复/成单」等更高级状态时**不降级**，仅更新发信时间。详情页跟进卡片展示发信时间，sync 导出/导入已兼容。
 
 > **API 调用方式核对（Gmail API 官方参考文档）**：
 > - `messages.get` 的 `metadataHeaders` 为**重复参数**（修正：逗号分隔字符串 → list，httpx 渲染为 `metadataHeaders=Subject&metadataHeaders=To&...`）

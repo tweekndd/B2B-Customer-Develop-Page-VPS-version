@@ -346,7 +346,7 @@ class TestSyncWithEmails:
         resp = client.get("/api/sync/export")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["version"] == "2.7"
+        assert data["version"] == "2.9"
         cust = data["data"]["customers"][0]
         assert cust["customer_emails"][0]["email"] == "sync@testwater.com"
         assert cust["customer_emails"][0]["source"] == "manual"

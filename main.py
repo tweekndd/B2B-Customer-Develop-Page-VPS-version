@@ -94,14 +94,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  [Gmail] 后台任务启动跳过: {e}")
 
+    # V5.3 阶段3：缓存周期清理后台任务（数据库瘦身）
+    _cache_cleanup_task = None
+    try:
+        from app.services import cache_cleanup_background
+        _cache_cleanup_task = asyncio.create_task(cache_cleanup_background.periodic_cache_cleanup())
+    except Exception as e:
+        print(f"  [缓存] 后台任务启动跳过: {e}")
+
     yield
 
-    if _mail_worker_task is not None:
-        _mail_worker_task.cancel()
-        try:
-            await _mail_worker_task
-        except (asyncio.CancelledError, Exception):
-            pass
+    for _task in (_mail_worker_task, _cache_cleanup_task):
+        if _task is not None:
+            _task.cancel()
+            try:
+                await _task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 # Python 3.14 兼容：关闭 Jinja2 模板缓存（Python 3.14 的 weakref 变更影响缓存键）

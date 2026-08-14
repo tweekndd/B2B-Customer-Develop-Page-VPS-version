@@ -174,9 +174,11 @@ function renderDetail(c) {
     kh += '</div></div>';
     kc.innerHTML = kh;
 
+    // V5.3 阶段2：分析历史徽标
+    renderIntelligenceBadge(c.intelligence);
+
     const ac = document.getElementById('aiResultContainer');
-    const aiRaw = c.ai_raw || {};
-    if (Object.keys(aiRaw).length === 0) {
+    const aiRaw = c.ai_raw || {};    if (Object.keys(aiRaw).length === 0) {
         ac.innerHTML = '<p class="text-muted small mb-0">尚未进行 AI 分析</p>';
     } else {
         let aiHtml = `
@@ -229,10 +231,19 @@ function renderDetail(c) {
         document.getElementById('textLength').textContent = '0 字符';
     }
 
-    document.getElementById('followUpStatus').value = c.status || '待联系';
-    document.getElementById('followUpDate').value = c.follow_up_date || '';
+    document.getElementById('followUpStatus').value = c.status || '待联系';    document.getElementById('followUpDate').value = c.follow_up_date || '';
     document.getElementById('followUpNotes').value = c.notes || '';
     document.getElementById('starRating').value = c.star_rating || 0;
+
+    // V5.2：发信时间（Gmail 发信检测自动回填）
+    const lastSentEl = document.getElementById('lastEmailSentAt');
+    if (lastSentEl) {
+        if (c.last_email_sent_at) {
+            lastSentEl.innerHTML = `<i class="bi bi-send me-1"></i>最近发信时间: <strong>${_esc(new Date(c.last_email_sent_at).toLocaleString())}</strong>（Gmail 检测）`;
+        } else {
+            lastSentEl.innerHTML = '';
+        }
+    }
 
     let statusIcons = '';
     if (c.scrape_status === 'success') statusIcons += '<span class="badge badge-status analyzed ms-1">已抓取</span>';
@@ -618,6 +629,71 @@ async function resolveLinkedinProfile(id) {
             showToast('刷新失败: ' + err.message, 'danger');
         }
     }
+}
+
+// ── 分析历史（V5.3 阶段2） ──
+let _analysisHistory = null;
+
+function renderIntelligenceBadge(info) {
+    const badge = document.getElementById('analysisCountBadge');
+    const btn = document.getElementById('btnAnalysisHistory');
+    if (!badge || !info) return;
+    if (info.analysis_count > 0) {
+        badge.style.display = '';
+        badge.textContent = `${info.analysis_count} 次分析`;
+        if (info.failed_count > 0) {
+            badge.classList.add('bg-warning', 'text-dark');
+        }
+        if (btn) btn.style.display = '';
+    }
+}
+
+async function toggleAnalysisHistory() {
+    const container = document.getElementById('analysisHistoryContainer');
+    if (!container) return;
+    if (container.classList.contains('d-none')) {
+        if (_analysisHistory === null) {
+            try {
+                const data = await _fetchWithTimeout(`/api/customers/${customerId}/intelligence-history`);
+                _analysisHistory = data;
+            } catch (err) {
+                container.innerHTML = `<div class="text-danger small">加载失败: ${_esc(err.message)}</div>`;
+                return;
+            }
+        }
+        renderAnalysisHistory(container);
+        container.classList.remove('d-none');
+    } else {
+        container.classList.add('d-none');
+    }
+}
+
+function renderAnalysisHistory(container) {
+    const data = _analysisHistory || {};
+    const runs = data.analysis_runs || [];
+    if (runs.length === 0) {
+        container.innerHTML = '<p class="text-muted small mb-0">暂无历史记录（新分析会自动沉淀历史版本）</p>';
+        return;
+    }
+    const rows = runs.map(r => {
+        const statusBadge = r.status === 'success'
+            ? '<span class="badge bg-success" style="font-size:0.7rem">成功</span>'
+            : `<span class="badge bg-danger" style="font-size:0.7rem" title="${_esc(r.error_message || '')}">失败</span>`;
+        const time = r.created_at ? _fmtDate(r.created_at) : '';
+        return `
+        <div class="border rounded p-2 mb-2 small">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+                <strong>${time}</strong>
+                ${statusBadge}
+                ${r.buyer_intent_score !== null && r.buyer_intent_score !== undefined
+                    ? `<span class="badge bg-info text-dark" style="font-size:0.7rem">买家意向 ${r.buyer_intent_score}/10</span>` : ''}
+            </div>
+            ${r.company_type ? `<div class="text-muted mt-1">公司类型: ${_esc(r.company_type)}</div>` : ''}
+            ${r.summary ? `<div class="text-muted mt-1">${_esc(r.summary)}</div>` : ''}
+            ${r.error_message ? `<div class="text-danger mt-1">${_esc(r.error_message)}</div>` : ''}
+        </div>`;
+    }).join('');
+    container.innerHTML = rows;
 }
 
 // ── 评分明细 ──

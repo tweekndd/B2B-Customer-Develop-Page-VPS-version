@@ -178,6 +178,48 @@ class TestMailSync:
         assert activity.match_type == "exact_domain"
         assert activity.subject == "RE: Water treatment quote"
         assert activity.sent_at is not None
+
+        # V5.2：客户跟进状态自动更新为「已发邮件」+ 发信时间回填
+        db.expire_all()
+        c = db.query(Customer).filter(Customer.id == customer_id).first()
+        assert c.status == "已发邮件"
+        assert c.last_email_sent_at is not None
+        assert c.last_email_sent_at.isoformat().startswith("2023-11-14T10:00:00")
+        db.close()
+
+    def test_status_not_downgraded_on_new_email(self, monkeypatch):
+        """V5.2：已是「已回复」的客户不会被降级为「已发邮件」，但发信时间仍更新"""
+        import app.services.gmail_service as gs
+        from app.services import mail_sync_service
+
+        db = TestSessionLocal()
+        c = _create_customer(db, status="已回复")
+        customer_id = c.id
+        account = _create_account(db)
+        db.close()
+
+        sent_msg = {
+            "id": "msg-status",
+            "threadId": "t-s",
+            "internalDate": "1700000000000",
+            "payload": {"headers": [
+                {"name": "To", "value": "sales@aquatech-solutions.com"},
+                {"name": "Subject", "value": "Hi"},
+                {"name": "Date", "value": "Tue, 14 Nov 2023 10:00:00 +0000"},
+            ]},
+        }
+        monkeypatch.setattr(gs, "list_sent_messages", lambda token, start_history_id=None, page_token=None, max_results=100, after_date=None: {
+            "messages": [{"id": "msg-status"}], "nextPageToken": None,
+        })
+        monkeypatch.setattr(gs, "get_message_metadata", lambda token, mid: sent_msg)
+
+        db = TestSessionLocal()
+        account = db.query(MailAccount).filter(MailAccount.id == account.id).first()
+        mail_sync_service.sync_account(db, account)
+        db.expire_all()
+        c = db.query(Customer).filter(Customer.id == customer_id).first()
+        assert c.status == "已回复"  # 不降级
+        assert c.last_email_sent_at is not None  # 发信时间仍更新
         db.close()
 
     def test_sync_idempotent(self, monkeypatch):
