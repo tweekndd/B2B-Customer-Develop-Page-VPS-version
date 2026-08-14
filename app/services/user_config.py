@@ -32,13 +32,15 @@ SERVICE_SEARXNG = "searxng"
 SERVICE_FIRECRAWL = "firecrawl"
 # LinkedIn OAuth（api_key=Client ID，api_secret=Primary Client Secret）
 SERVICE_LINKEDIN = "linkedin"
+# Gmail OAuth（api_key=Client ID，api_secret=Client Secret，发信检测）
+SERVICE_GMAIL = "gmail"
 # 用户偏好的搜索引擎（base_url 字段存引擎名: tavily/serpapi/searxng）
 SERVICE_SEARCH_ENGINE = "search_engine"
 
 ALL_SERVICES = [
     SERVICE_LLM, SERVICE_HUNTER, SERVICE_TOMBA, SERVICE_PROSPEO,
     SERVICE_TAVILY, SERVICE_SERPAPI, SERVICE_SEARXNG,
-    SERVICE_FIRECRAWL, SERVICE_LINKEDIN, SERVICE_SEARCH_ENGINE,
+    SERVICE_FIRECRAWL, SERVICE_LINKEDIN, SERVICE_GMAIL, SERVICE_SEARCH_ENGINE,
 ]
 
 # 服务 → 环境变量名（按优先级排序）映射
@@ -51,6 +53,7 @@ _ENV_KEY_MAP = {
     SERVICE_SERPAPI: ("SERPAPI_API_KEY",),
     SERVICE_FIRECRAWL: ("FIRECRAWL_API_KEY",),
     SERVICE_LINKEDIN: ("LINKEDIN_CLIENT_ID",),
+    SERVICE_GMAIL: ("GMAIL_CLIENT_ID",),
 }
 
 _fernet: Optional[Fernet] = None
@@ -152,6 +155,8 @@ def get_env_api_secret(service: str) -> str:
         return os.environ.get("TOMBA_API_SECRET", "").strip()
     if service == SERVICE_LINKEDIN:
         return os.environ.get("LINKEDIN_CLIENT_SECRET", "").strip()
+    if service == SERVICE_GMAIL:
+        return os.environ.get("GMAIL_CLIENT_SECRET", "").strip()
     return ""
 
 

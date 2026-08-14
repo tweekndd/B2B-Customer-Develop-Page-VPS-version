@@ -1,5 +1,33 @@
 # 更新日志
 
+## v5.2（2026-08-14）
+
+### 📧 自有邮箱发信检测（Gmail）
+
+按方案文档第三期实现：用户授权自己的 Gmail 后，系统只读扫描「已发送」邮件，按收件人域名自动匹配客户，详情页展示发信记录（主题/时间/收件人/发件邮箱）。
+
+> **API 调用方式核对（Gmail API 官方参考文档）**：
+> - `messages.get` 的 `metadataHeaders` 为**重复参数**（修正：逗号分隔字符串 → list，httpx 渲染为 `metadataHeaders=Subject&metadataHeaders=To&...`）
+> - `messages.list` 响应**不含 historyId**（修正：轮询模式基于 `last_synced_at` 用 `q=in:sent after:YYYY/MM/DD` 增量，避免全量扫描；首次同步后若配置 Pub/Sub topic 则调 `watch` 建立 history 游标）
+> - 其余端点路径/参数（`/gmail/v1/users/me/{profile,watch,stop,history,messages}`、`labelId=SENT`、`format=metadata`、`internalDate` 毫秒时间戳）与官方文档一致 ✓
+
+- **数据库**：新增 `mail_accounts` 表（user_id 关联、token 加密存储、refresh token、sync_cursor=historyId、watch_expiration_at、状态机 active/reauth_required/error）；新增 `customer_email_activities` 表（provider_message_id + matched_domain 唯一约束防重复）
+- **域名匹配器** `email_domain_matcher.py`：registrable domain 提取（公共后缀表 co.uk/com.cn 等）、严格主域匹配（默认不开启子域）、**禁止反向包含**（evilaquatech.com 不匹配 aquatech.com）、customer_emails 表手动邮箱域名匹配（match_type=manual_email）
+- **Gmail 服务** `gmail_service.py`：OAuth 2.0（offline 授权拿 refresh token，最小权限 `gmail.readonly`）、token 刷新与加密存取、watch（Pub/Sub 可选）、history.list 增量 / messages.list 初始同步、messages.get(metadata) 解析（Subject/To/Cc/Date/Message-ID）
+- **同步编排** `mail_sync_service.py`：预加载客户域名 → 增量拉取 SENT 邮件 → 域名匹配 → 写入活动表（幂等）；`renew_watches()` 批量续期
+- **后台任务** `mail_background.py`：lifespan 启动 asyncio 循环（默认每 6 小时）——watch 到期前 24h 续期 + 超 12h 未同步的补偿同步（无 Pub/Sub 环境自动退化为轮询模式）
+- **新 API**：
+  - `mail_accounts.py`：`GET /api/mail-accounts`、`GET /api/mail-accounts/gmail/oauth/start|callback`（state 防 CSRF）、`POST /api/mail-accounts/{id}/sync|renew|disconnect`、`GET /api/mail-accounts/{id}/status`
+  - `mail_activities.py`：`GET /api/customers/{id}/email-activities`（分页 + 忽略过滤）、`POST .../email-activities/sync`、`POST /api/email-activities/{id}/ignore`、`DELETE /api/email-activities/{id}`
+  - `mail_webhooks.py`：`POST /api/webhooks/gmail/pubsub`（可配 `GMAIL_PUBSUB_TOKEN` Bearer 校验，异步同步）
+- **安全**：`main.py` API 认证中间件豁免 `/api/webhooks/`（第三方推送无浏览器 Session）；`security.py` 新增 webhook（300/60s）与 mail-accounts（30/60s）限流组
+- **前端**：设置页新增「自有邮箱发信检测（Gmail）」卡片（Client ID/Secret 保存、连接 Gmail、账户列表+同步/续期/断开、状态徽章）；客户详情页新增「发信记录」tab（列表 + 立即同步 + 忽略误匹配 + 删除）
+- **配置**：`.env.example` 新增 `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_PUBSUB_TOPIC` / `GMAIL_PUBSUB_TOKEN` / `MAIL_MAINTENANCE_INTERVAL`
+
+**验证**：`pytest tests/` **378 个测试全部通过**（新增 18 个：域名匹配、同步编排 mock、幂等、webhook 白名单与令牌校验、账户/活动 API）。
+
+---
+
 ## v5.1（2026-08-13）
 
 ### 📬 客户邮箱结构化维护（CustomerEmail 接线）

@@ -57,6 +57,7 @@
 | **邮箱结构化维护 V5.1** | `customer_emails` 表为邮箱唯一事实源：手动新增/编辑/删除/设主邮箱，来源与验证状态徽章，旧 JSON 一键合并，全链路双写兼容 |
 | **LinkedIn 公司页发现 V5.1** | 搜索引擎候选发现（`site:linkedin.com/company`，复用运行时切换引擎）→ 候选评分 → 人工确认，支持手动粘贴 URL |
 | **LinkedIn 官方 API V5.1** | OAuth 2.0 授权（设置页配置 Client ID / Secret）→ Organizations Lookup API（`?q=vanityName`）刷新组织详情：名称/Logo/地点/员工规模/官网 |
+| **自有邮箱发信检测 V5.2** | 授权 Gmail（只读 `gmail.readonly`，最小权限）→ 增量扫描已发送邮件 → 严格主域匹配客户（防反向包含）→ 详情页展示发信记录（主题/时间/收件人/发件邮箱），支持 Pub/Sub 推送 + 轮询补偿双模式 |
 | **相似客户扩展** | 输入公司网址 + 目标国家，自动搜索相似客户，支持多语言本地化搜索 |
 | **客户地理分布地图** | Leaflet.js 地图可视化：城市级定位 + MarkerCluster 聚合 + 暗色/亮色主题自适应 |
 | **智能去重** | 域名 + 标准化公司名双重去重，自动合并重复发现的关键词 |
@@ -213,6 +214,11 @@ cp .env.example .env
 | `LINKEDIN_CLIENT_ID` | — | LinkedIn Developer App Client ID（V5.1，OAuth 用） |
 | `LINKEDIN_CLIENT_SECRET` | — | LinkedIn App Primary Client Secret（V5.1） |
 | `LINKEDIN_API_VERSION` | `202607` | LinkedIn-Version 请求头（Organizations Lookup API） |
+| `GMAIL_CLIENT_ID` | — | Google Cloud OAuth Client ID（V5.2 发信检测） |
+| `GMAIL_CLIENT_SECRET` | — | Google Cloud OAuth Client Secret（V5.2） |
+| `GMAIL_PUBSUB_TOPIC` | — | 可选：Gmail watch Pub/Sub topic（未配置时自动退化为轮询同步） |
+| `GMAIL_PUBSUB_TOKEN` | — | 可选：Pub/Sub push Bearer 令牌校验 |
+| `MAIL_MAINTENANCE_INTERVAL` | `21600` | 发信检测后台维护间隔秒（watch 续期 + 补偿同步） |
 | `READER_BASE_URL` | `https://r.jina.ai` | Jina AI Reader API 地址 |
 | `FIRECRAWL_API_KEY` | — | （可选旧版兜底） |
 | `EMAIL_DISCOVERY_MIN_RESULTS` | `2` | 瀑布流结果低于此值触发下一级 |
@@ -288,6 +294,15 @@ cp .env.example .env
 - 完成 OAuth 授权后，候选行出现 **官方 API 刷新** 按钮 → 调用 Organizations Lookup API 补齐组织名称/Logo/地点/员工规模/官网
 - Excel 导出 H 列「领英」自动回填已确认主页
 
+#### 发信记录（V5.2）
+
+详情页 → 「发信记录」tab：
+1. 设置页完成 Gmail 授权（只读权限，仅扫描**已发送**邮件）
+2. 点击 **立即同步** → 系统增量拉取已发送邮件，按**收件人域名严格匹配**客户官网主域（`evilabc.com` 不会误匹配 `abc.com`；客户邮箱表中已存邮箱也可匹配）
+3. 列表展示：主题、发件邮箱、收件人、发送时间、匹配类型徽章（域名匹配 / 已存邮箱匹配）
+4. 误匹配可 **忽略**（默认隐藏）或 **删除** 记录（不影响邮箱原邮件）
+5. 已配置 `GMAIL_PUBSUB_TOPIC` 时实时推送；未配置时后台每 6 小时轮询补偿同步（不会漏检测）
+
 ### AI 与 API 设置页（V4.6）
 
 导航栏 → **AI 与 API 设置**（需登录）：
@@ -295,6 +310,7 @@ cp .env.example .env
 - **邮箱服务**：Hunter / Tomba / Prospeo 的 Key 配置
 - **搜索引擎**：Tavily / SerpAPI / SearXNG 的 Key 或 URL，并设置首选引擎
 - **LinkedIn 授权（V5.1）**：在 [LinkedIn Developer Portal](https://www.linkedin.com/developers/apps) 创建 App → 填写 **Client ID** 与 **Primary Client Secret** → 保存后点击 **开始授权** → LinkedIn 授权页确认 → 自动回跳。需在 LinkedIn App 的 Redirect URLs 中添加 `https://你的域名/api/linkedin/oauth/callback`
+- **Gmail 发信检测（V5.2）**：在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 创建 OAuth 2.0 Client（Web 应用）→ 填写 **Client ID / Client Secret** → 点击 **连接 Gmail** → Google 授权页确认 → 自动回跳。回调地址：`https://你的域名/api/mail-accounts/oauth/callback/gmail`；已连接账户可手动「立即同步」或依赖后台轮询（每 6 小时，可配 `MAIL_MAINTENANCE_INTERVAL`）
 - Key **加密存储**（Fernet），仅本人可见，页面只显示后 4 位；未配置的服务自动回退服务器环境变量
 
 ### 客户地理分布地图
@@ -544,6 +560,9 @@ AI-Trade-Customer-Analyzer/
 │   │   ├── user_config.py            # 用户级 API Key 配置（V4.6）
 │   │   ├── customer_emails.py        # 邮箱维护（V5.1）
 │   │   ├── linkedin.py               # LinkedIn 发现 + OAuth + Lookup（V5.1）
+│   │   ├── mail_accounts.py          # 邮箱账户绑定/同步/断开（V5.2）
+│   │   ├── mail_activities.py        # 发信记录列表/忽略/删除（V5.2）
+│   │   ├── mail_webhooks.py          # Gmail Pub/Sub Webhook（V5.2）
 │   │   ├── hunter.py / tomba.py / waterfall.py  # 邮箱查找
 │   │   ├── users.py                  # 用户管理
 │   │   └── geocode.py                # 地理编码
@@ -553,6 +572,11 @@ AI-Trade-Customer-Analyzer/
 │   │   ├── customer_email_service.py # 邮箱结构化统一服务（V5.1）
 │   │   ├── linkedin_service.py       # LinkedIn 公司页候选发现（V5.1）
 │   │   ├── linkedin_oauth_service.py # LinkedIn OAuth + Lookup API（V5.1）
+│   │   ├── gmail_service.py          # Gmail OAuth/watch/history/解析（V5.2）
+│   │   ├── mail_sync_service.py      # 发信检测同步编排（V5.2）
+│   │   ├── mail_account_service.py   # 邮箱账户绑定/状态（V5.2）
+│   │   ├── email_domain_matcher.py   # 域名匹配器（V5.2）
+│   │   ├── mail_background.py        # watch 续期 + 补偿同步（V5.2）
 │   │   ├── user_config.py            # 用户级 API Key 服务层（加密存储）
 │   │   ├── google_discovery.py       # 搜索引擎（运行时切换）
 │   │   ├── searxng_discovery.py      # SearXNG 搜索客户端
@@ -578,7 +602,7 @@ AI-Trade-Customer-Analyzer/
 │   ├── static/js/                    # JS 模块（含 settings.js 设置页）
 │   ├── templates/                    # HTML 模板（含 settings.html / filemanager.html）
 │   └── filemanager.py                # VPS 文件管理器（仅管理员）
-└── tests/                            # 360 个测试用例
+└── tests/                            # 378 个测试用例
 ```
 
 ---
@@ -602,6 +626,8 @@ AI-Trade-Customer-Analyzer/
 | `customer_emails` | 结构化邮箱（V5.0 表 / V5.1 接线为唯一事实源：来源/验证/主邮箱/备注） |
 | `customer_social_profiles` | 社交主页（V5.1：LinkedIn 候选 + 已确认，唯一确认约束） |
 | `linkedin_oauth_tokens` | LinkedIn OAuth token（V5.1：user_id 唯一，加密存储 + 过期时间） |
+| `mail_accounts` | 自有邮箱账户（V5.2：Gmail token/refresh/游标/状态，加密存储） |
+| `customer_email_activities` | 客户发信记录（V5.2：域名匹配结果，幂等唯一约束） |
 
 > **用户级 API Key**：`user_api_config` 表按「用户 + 服务」唯一存储各用户自己的 Key，加密密钥来自 `API_CONFIG_ENCRYPTION_KEY` 环境变量（未设置时自动生成并持久化到 `app/.config_encryption_key`，该文件已被 gitignore）。
 
@@ -640,7 +666,7 @@ AI-Trade-Customer-Analyzer/
 | **爬虫** | httpx + BeautifulSoup（异步并发）· Jina AI Reader 免费降级 |
 | **地图** | Leaflet.js + MarkerCluster + Nominatim |
 | **部署** | Docker · Docker Compose · Nginx · Let's Encrypt |
-| **测试** | pytest（360 测试用例：纯逻辑单元 + API 集成） |
+| **测试** | pytest（378 测试用例：纯逻辑单元 + API 集成） |
 | **缓存** | 本地 SQLite 多级缓存（搜索 / 官网 / AI 分析 / 邮箱 / 地理编码） |
 | **认证** | Session + bcrypt · 多用户 · 逐用户配额管控 |
 
@@ -650,7 +676,7 @@ AI-Trade-Customer-Analyzer/
 
 ```bash
 source venv/bin/activate
-pytest tests/ -v     # 360 测试，详细输出
+pytest tests/ -v     # 378 测试，详细输出
 pytest tests/ -q     # 简洁输出
 ```
 
@@ -661,4 +687,5 @@ pytest tests/ -q     # 简洁输出
 **© 2026 AI Customer Development System** · Apache-2.0 License · [GitHub](https://github.com/tweekndd/B2B-Customer-Develop-Page-VPS-version)
 
 </div>
+
 

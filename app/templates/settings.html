@@ -135,6 +135,51 @@
                 </div>
             </div>
         </div>
+
+        <!-- ═══════════ Gmail 发信检测（V5.2） ═══════════ -->
+        <div class="card border-0 mb-4" data-animate data-delay="300">
+            <div class="card-header d-flex align-items-center">
+                <i class="bi bi-envelope-open"></i> 自有邮箱发信检测（Gmail）
+                <span class="ms-auto" id="gmailStatusBadge"></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    授权你自己的 Gmail 后，系统只读扫描<b>已发送</b>邮件，按收件人域名自动匹配客户，
+                    在客户详情页展示<b>发信记录</b>（主题/时间/收件人/发件邮箱）。
+                    需在 <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" class="text-decoration-none">Google Cloud Console</a>
+                    创建 OAuth 2.0 Client ID（Web 应用），回调地址填入：
+                    <code id="gmailCallbackHint">http(s)://你的域名/api/mail-accounts/oauth/callback/gmail</code>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Gmail Client ID</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="gmailClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off">
+                            <button class="btn btn-outline-secondary" type="button" onclick="toggleKey('gmailClientId', this)"><i class="bi bi-eye"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Gmail Client Secret</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="gmailClientSecret" placeholder="GOCSPX-...." autocomplete="off">
+                            <button class="btn btn-outline-secondary" type="button" onclick="toggleKey('gmailClientSecret', this)"><i class="bi bi-eye"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+                    <button class="btn btn-accent" onclick="saveGmailConfig()" id="btnSaveGmail">
+                        <i class="bi bi-floppy me-1"></i>保存配置
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="connectGmail()" id="btnConnectGmail">
+                        <i class="bi bi-google me-1"></i>连接 Gmail
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="deleteService('gmail')">
+                        <i class="bi bi-trash me-1"></i>删除我的配置
+                    </button>
+                </div>
+                <div id="gmailAccounts" class="mt-3"></div>
+            </div>
+        </div>
     </div>
 
     <!-- ═══════════ 搜索引擎配置 ═══════════ -->

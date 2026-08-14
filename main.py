@@ -15,6 +15,7 @@ V4.6: 买家/供应商评分分级 + 多语种 AI 开发信生成
 import os
 import time
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 import uvicorn
@@ -84,7 +85,23 @@ async def lifespan(app: FastAPI):
     print(f" 地图页面:  http://localhost:{_PORT}/map")
     print(f" AI 设置:   http://localhost:{_PORT}/settings")
     print("=" * 50)
+
+    # V5.2：Gmail 发信检测后台任务（watch 续期 + 补偿同步）
+    _mail_worker_task = None
+    try:
+        from app.services import mail_background
+        _mail_worker_task = asyncio.create_task(mail_background.periodic_mail_maintenance())
+    except Exception as e:
+        print(f"  [Gmail] 后台任务启动跳过: {e}")
+
     yield
+
+    if _mail_worker_task is not None:
+        _mail_worker_task.cancel()
+        try:
+            await _mail_worker_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 # Python 3.14 兼容：关闭 Jinja2 模板缓存（Python 3.14 的 weakref 变更影响缓存键）
@@ -156,11 +173,16 @@ async def security_middleware(request: Request, call_next):
 # ── API 认证中间件 ──
 # 注意：必须定义在 add_middleware(SessionMiddleware) 之前，
 # 这样 SessionMiddleware 会成为外层，先处理 session 再进入此中间件
+_PUBLIC_API_PATHS = (
+    "/api/auth/",
+    "/api/webhooks/",   # V5.2：Gmail Pub/Sub 推送（第三方服务，无浏览器 Session）
+)
+
 @app.middleware("http")
 async def api_auth_middleware(request: Request, call_next):
-    """API 请求必须登录（/api/auth/* 除外），未登录返回 401"""
+    """API 请求必须登录（/api/auth/* 与 /api/webhooks/* 除外），未登录返回 401"""
     path = request.url.path
-    if path.startswith("/api/") and not path.startswith("/api/auth/"):
+    if path.startswith("/api/") and not path.startswith(_PUBLIC_API_PATHS):
         user_id = request.session.get("user_id")
         if user_id is None:
             return JSONResponse(

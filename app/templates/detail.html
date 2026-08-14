@@ -126,6 +126,11 @@
                                 <i class="bi bi-envelope-at me-1"></i>Hunter 精确
                             </button>
                         </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="mailActivityTab" data-bs-toggle="tab" data-bs-target="#mailActivityPanel" type="button" role="tab">
+                                <i class="bi bi-envelope-open me-1"></i>发信记录
+                            </button>
+                        </li>
                     </ul>
 
                     <div class="tab-content">
@@ -263,6 +268,17 @@
                                     <span>正在通过 Hunter 查询邮箱...</span>
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- 发信记录面板（V5.2） -->
+                        <div class="tab-pane fade" id="mailActivityPanel" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                                <span class="text-muted small" id="mailActivityInfo">连接 Gmail 后自动检测发往该客户的邮件</span>
+                                <button class="btn btn-sm btn-outline-primary" onclick="syncEmailActivities()" id="btnSyncActivities">
+                                    <i class="bi bi-arrow-repeat me-1"></i>立即同步
+                                </button>
+                            </div>
+                            <div id="mailActivityList"></div>
                         </div>
                     </div>
                 </div>

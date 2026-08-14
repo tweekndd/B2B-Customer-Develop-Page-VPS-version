@@ -493,6 +493,152 @@ async function loadLinkedinOauthStatus() {
 }
 
 // ═══════════════════════════════════════════
+// Gmail 发信检测（V5.2）
+// ═══════════════════════════════════════════
+
+function renderGmailConfig(savedConfig, effective, mailStatus) {
+    const badge = document.getElementById('gmailStatusBadge');
+    if (!badge) return;
+
+    const credBadge = effective && effective.configured
+        ? (effective.source === 'user'
+            ? '<span class="badge rounded-pill bg-success">已配置（用户）</span>'
+            : '<span class="badge rounded-pill bg-info text-dark">服务器默认</span>')
+        : '<span class="badge rounded-pill bg-secondary">未配置</span>';
+    const cnt = (mailStatus && mailStatus.account_count) || 0;
+    const accBadge = cnt > 0
+        ? `<span class="badge rounded-pill bg-success">已连接 ${cnt} 个邮箱</span>`
+        : '<span class="badge rounded-pill bg-secondary">未连接</span>';
+    badge.innerHTML = credBadge + ' ' + accBadge;
+
+    if (savedConfig) {
+        if (savedConfig.api_key_set) {
+            document.getElementById('gmailClientId').placeholder = savedConfig.api_key + '（点击输入框替换）';
+        }
+        if (savedConfig.api_secret_set) {
+            document.getElementById('gmailClientSecret').placeholder = savedConfig.api_secret + '（点击输入框替换）';
+        }
+    }
+
+    renderMailAccounts(mailStatus);
+}
+
+function renderMailAccounts(mailStatus) {
+    const container = document.getElementById('gmailAccounts');
+    if (!container) return;
+    const accounts = (mailStatus && mailStatus.accounts) || [];
+    if (accounts.length === 0) {
+        container.innerHTML = '<p class="text-muted small mb-0 mt-2">尚未连接 Gmail 邮箱账户。保存 Client ID / Secret 后点击「连接 Gmail」，系统将引导你完成授权。</p>';
+        return;
+    }
+    const statusLabels = { active: '正常', reauth_required: '需重新授权', error: '异常', disabled: '已禁用' };
+    const rows = accounts.map(a => {
+        const stBadge = a.status === 'active'
+            ? '<span class="badge bg-success" style="font-size:0.7rem">正常</span>'
+            : `<span class="badge bg-warning text-dark" style="font-size:0.7rem">${statusLabels[a.status] || a.status}</span>`;
+        return `
+        <div class="border rounded p-2 mb-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <strong><i class="bi bi-google me-1"></i>${_esc(a.email_address)}</strong>
+                ${stBadge}
+                <div class="small text-muted">
+                    最后同步: ${a.last_synced_at ? _esc(new Date(a.last_synced_at).toLocaleString()) : '从未'}
+                    ${a.watch_enabled ? ' · 推送已开启' : ' · 轮询模式'}
+                    ${a.last_error ? `<span class="text-danger ms-1">${_esc(a.last_error)}</span>` : ''}
+                </div>
+            </div>
+            <div class="d-flex gap-1">
+                <button class="btn btn-sm btn-outline-primary" onclick="syncMailAccount(${a.id})" title="立即同步"><i class="bi bi-arrow-repeat"></i></button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="renewMailAccount(${a.id})" title="续期推送"><i class="bi bi-bell"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="disconnectMailAccount(${a.id}, '${_esc(a.email_address)}')" title="断开"><i class="bi bi-x-circle"></i></button>
+            </div>
+        </div>`;
+    }).join('');
+    container.innerHTML = rows;
+}
+
+async function saveGmailConfig() {
+    const clientId = document.getElementById('gmailClientId').value.trim();
+    const clientSecret = document.getElementById('gmailClientSecret').value.trim();
+    if (!clientId && !clientSecret) {
+        showToast('请至少填写 Client ID 或 Client Secret', 'warning');
+        return;
+    }
+    const btn = document.getElementById('btnSaveGmail');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>保存中...';
+    try {
+        const res = await saveService('gmail', { api_key: clientId || null, api_secret: clientSecret || null, enabled: true });
+        showToast(res.message || 'Gmail 配置已保存', 'success');
+        document.getElementById('gmailClientId').value = '';
+        document.getElementById('gmailClientSecret').value = '';
+        document.getElementById('gmailClientId').placeholder = '';
+        document.getElementById('gmailClientSecret').placeholder = '';
+        await loadAll();
+    } catch (err) {
+        showToast('保存失败: ' + err.message, 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-floppy me-1"></i>保存配置';
+    }
+}
+
+async function connectGmail() {
+    try {
+        const status = await _fetchWithTimeout('/api/mail-accounts');
+        if (!status.status || !status.status.client_configured) {
+            showToast('请先保存 Gmail Client ID / Secret', 'warning');
+            return;
+        }
+        window.location.href = '/api/mail-accounts/gmail/oauth/start';
+    } catch (err) {
+        showToast('启动授权失败: ' + err.message, 'danger');
+    }
+}
+
+async function syncMailAccount(id) {
+    try {
+        const res = await _fetchWithTimeout(`/api/mail-accounts/${id}/sync`, { method: 'POST' }, 120000);
+        const s = res.stats || {};
+        showToast(`同步完成：新增 ${s.new_activities || 0} 条发信记录`, 'success');
+        await loadMailAccounts();
+    } catch (err) {
+        showToast('同步失败: ' + err.message, 'danger');
+    }
+}
+
+async function renewMailAccount(id) {
+    try {
+        const res = await _fetchWithTimeout(`/api/mail-accounts/${id}/renew`, { method: 'POST' }, 30000);
+        showToast(res.message || '已续期', 'success');
+        await loadMailAccounts();
+    } catch (err) {
+        showToast('续期失败: ' + err.message, 'danger');
+    }
+}
+
+async function disconnectMailAccount(id, email) {
+    if (!confirm(`确定断开邮箱 ${email} 吗？断开后将停止发信检测。`)) return;
+    try {
+        await _fetchWithTimeout(`/api/mail-accounts/${id}/disconnect`, { method: 'POST' });
+        showToast('已断开', 'success');
+        await loadMailAccounts();
+    } catch (err) {
+        showToast('操作失败: ' + err.message, 'danger');
+    }
+}
+
+async function loadMailAccounts() {
+    try {
+        const status = await _fetchWithTimeout('/api/mail-accounts');
+        return status;
+    } catch (err) {
+        console.error('加载邮箱账户失败:', err);
+        return null;
+    }
+}
+
+// ═══════════════════════════════════════════
 // 整体加载
 // ═══════════════════════════════════════════
 
@@ -509,6 +655,9 @@ async function loadAll() {
 
         const oauthStatus = await loadLinkedinOauthStatus();
         renderLinkedinConfig(savedMap.linkedin || null, effMap.linkedin || {}, oauthStatus);
+
+        const mailStatus = await loadMailAccounts();
+        renderGmailConfig(savedMap.gmail || null, effMap.gmail || {}, mailStatus);
     } catch (err) {
         showToast('加载配置失败: ' + err.message, 'danger');
     }
@@ -528,5 +677,10 @@ window.toggleKey = toggleKey;
 window.saveLinkedinConfig = saveLinkedinConfig;
 window.startLinkedinOauth = startLinkedinOauth;
 window.disconnectLinkedinOauth = disconnectLinkedinOauth;
+window.saveGmailConfig = saveGmailConfig;
+window.connectGmail = connectGmail;
+window.syncMailAccount = syncMailAccount;
+window.renewMailAccount = renewMailAccount;
+window.disconnectMailAccount = disconnectMailAccount;
 
 })();

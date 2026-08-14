@@ -1303,9 +1303,113 @@ function openMailClient() {
         + '&body=' + encodeURIComponent(body);
 }
 
+// ── 发信记录（V5.2） ──
+let _mailActivities = [];
+
+async function loadEmailActivities() {
+    try {
+        const data = await _fetchWithTimeout(`/api/customers/${customerId}/email-activities`);
+        _mailActivities = data.activities || [];
+        renderEmailActivities(data);
+    } catch (err) {
+        console.error('加载发信记录失败:', err);
+    }
+}
+
+function renderEmailActivities(data) {
+    const container = document.getElementById('mailActivityList');
+    if (!container) return;
+    const activities = data.activities || [];
+    const info = document.getElementById('mailActivityInfo');
+    if (info) info.textContent = `共 ${data.total || 0} 条发信记录`;
+
+    if (activities.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info py-2 px-3 mb-0 small">
+                <i class="bi bi-info-circle me-1"></i>暂无发信记录。
+                到 <a href="/settings" class="text-decoration-none">设置页</a> 连接 Gmail 并点击「立即同步」，
+                系统将自动识别发往该客户的邮件（按收件人域名匹配）。
+            </div>`;
+        return;
+    }
+
+    const rows = activities.map(a => {
+        const matchBadge = a.match_type === 'manual_email'
+            ? '<span class="badge bg-info text-dark" style="font-size:0.7rem">已存邮箱匹配</span>'
+            : `<span class="badge bg-success" style="font-size:0.7rem">域名匹配 · ${_esc(a.matched_domain || '')}</span>`;
+        const sent = a.sent_at ? _fmtDate(a.sent_at) : '未知时间';
+        const to = (a.to_addresses || []).join(', ') || '-';
+        return `
+        <div class="email-record">
+            <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <strong>${_esc(a.subject || '(无主题)')}</strong>
+                        ${matchBadge}
+                    </div>
+                    <div class="small text-muted mt-1">
+                        <span class="me-2"><i class="bi bi-send me-1"></i>${_esc(a.email_address || a.from_address || '')}</span>
+                        <span class="me-2"><i class="bi bi-person me-1"></i>${_esc(to)}</span>
+                        <span><i class="bi bi-clock me-1"></i>${sent}</span>
+                    </div>
+                    ${a.snippet ? `<div class="small text-muted mt-1">${_esc(a.snippet)}</div>` : ''}
+                </div>
+                <div class="d-flex gap-1 flex-shrink-0">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="ignoreMailActivity(${a.id})" title="忽略误匹配"><i class="bi bi-eye-slash"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteMailActivity(${a.id})" title="删除记录"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    container.innerHTML = `
+        <div>${rows}</div>
+        ${data.total > data.page_size ? `<div class="small text-muted mt-2">仅显示最近 ${data.page_size} 条，共 ${data.total} 条</div>` : ''}`;
+}
+
+async function syncEmailActivities() {
+    const btn = document.getElementById('btnSyncActivities');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>同步中...';
+    try {
+        const data = await _fetchWithTimeout(`/api/customers/${customerId}/email-activities/sync`, { method: 'POST' }, 120000);
+        let total = 0;
+        Object.values(data.results || {}).forEach(s => { total += s.new_activities || 0; });
+        showToast(`同步完成，新增 ${total} 条发信记录`, 'success');
+        await loadEmailActivities();
+    } catch (err) {
+        showToast('同步失败: ' + err.message, 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>立即同步';
+    }
+}
+
+async function ignoreMailActivity(id) {
+    try {
+        await _fetchWithTimeout(`/api/email-activities/${id}/ignore`, { method: 'POST' });
+        showToast('已忽略该记录', 'success');
+        await loadEmailActivities();
+    } catch (err) {
+        showToast('操作失败: ' + err.message, 'danger');
+    }
+}
+
+async function deleteMailActivity(id) {
+    if (!confirm('确定删除这条发信记录吗？（不影响邮箱里的原邮件）')) return;
+    try {
+        await _fetchWithTimeout(`/api/email-activities/${id}`, { method: 'DELETE' });
+        showToast('已删除', 'success');
+        await loadEmailActivities();
+    } catch (err) {
+        showToast('删除失败: ' + err.message, 'danger');
+    }
+}
+
 // ── 初始化 ──
 document.addEventListener('DOMContentLoaded', () => {
     loadDetail();
     checkHunterConfigDetail();
     loadLinkedinProfiles();
+    loadEmailActivities();
 });

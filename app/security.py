@@ -143,6 +143,8 @@ RATE_LIMITS = [
     (r"^/api/tomba/", 15, 60),               # Tomba 邮箱查找 — 消耗付费额度
     (r"^/api/waterfall/", 15, 60),           # 级联邮箱发现
     (r"^/api/sync/", 30, 60),                # 数据同步/导入导出
+    (r"^/api/webhooks/", 300, 60),           # V5.2：Gmail Pub/Sub 推送（高限额）
+    (r"^/api/mail-accounts/", 30, 60),       # V5.2：邮箱账户/发信检测
     (r"^/api/", 120, 60),                    # 其余 API
     (r"^/static/", 300, 60),
     (r"^/.*", 300, 60),                      # 普通页面
