@@ -50,6 +50,18 @@ def _safe_name(name: str) -> str:
     return name
 
 
+def _safe_rel(raw: str) -> list[str]:
+    """上传相对路径净化：拆成安全段列表（支持多级子目录）。
+    拒绝绝对路径 / .. / 空段 / 空字节，防止路径穿越。"""
+    raw = (raw or "").replace("\\", "/")
+    parts = [seg for seg in raw.split("/") if seg not in ("", ".")]
+    if not parts:
+        raise HTTPException(status_code=400, detail="非法的文件路径")
+    if raw.startswith("/") or any(seg == ".." for seg in parts) or any("\x00" in seg for seg in parts):
+        raise HTTPException(status_code=400, detail="非法的文件路径")
+    return parts
+
+
 def _fmt_size(n) -> str:
     if n is None:
         return "-"
@@ -154,7 +166,7 @@ def download(path: str = "/", admin=Depends(require_admin)):
     return FileResponse(p, filename=os.path.basename(p))
 
 
-# ── 上传（流式写盘，同名自动加序号避免覆盖） ─────────────────────────
+# ── 上传（流式写盘，同名自动加序号避免覆盖；支持文件夹上传保留相对路径） ──
 
 @router.post("/upload")
 async def upload(path: str = "/", files: list[UploadFile] = File(...), admin=Depends(require_admin)):
@@ -163,18 +175,28 @@ async def upload(path: str = "/", files: list[UploadFile] = File(...), admin=Dep
         raise HTTPException(status_code=400, detail="上传目标必须是目录")
     if not files:
         raise HTTPException(status_code=400, detail="未选择文件")
+    base_real = os.path.realpath(p)
     saved = []
     for f in files:
-        name = _safe_name(f.filename or "")
-        if not name:
-            continue
-        dest = os.path.join(p, name)
+        parts = _safe_rel(f.filename or "")
+        rel_dir, fname = parts[:-1], parts[-1]
+        dest_dir = os.path.join(p, *rel_dir) if rel_dir else p
+        dest_dir = os.path.realpath(dest_dir)
+        # 防路径穿越：解析后必须仍在目标目录内
+        if not (dest_dir == base_real or dest_dir.startswith(base_real + os.sep)):
+            raise HTTPException(status_code=400, detail="非法的文件路径")
+        if rel_dir:
+            try:
+                os.makedirs(dest_dir, exist_ok=True)
+            except OSError as e:
+                raise HTTPException(status_code=500, detail=f"创建子目录失败 {os.path.join(*rel_dir)}: {e}")
+        dest = os.path.join(dest_dir, fname)
         if _exists(dest):
-            stem, ext = os.path.splitext(name)
+            stem, ext = os.path.splitext(fname)
             i = 1
-            while _exists(os.path.join(p, f"{stem} ({i}){ext}")):
+            while _exists(os.path.join(dest_dir, f"{stem} ({i}){ext}")):
                 i += 1
-            dest = os.path.join(p, f"{stem} ({i}){ext}")
+            dest = os.path.join(dest_dir, f"{stem} ({i}){ext}")
         try:
             async with aiofiles.open(dest, "wb") as out:
                 while True:
@@ -182,9 +204,9 @@ async def upload(path: str = "/", files: list[UploadFile] = File(...), admin=Dep
                     if not chunk:
                         break
                     await out.write(chunk)
-            saved.append({"name": os.path.basename(dest), "path": dest})
+            saved.append({"name": os.path.relpath(dest, p), "path": dest})
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"写入失败 {name}: {e}")
+            raise HTTPException(status_code=500, detail=f"写入失败 {fname}: {e}")
         finally:
             await f.close()
     if not saved:

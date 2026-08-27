@@ -6,7 +6,9 @@ import json
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Depends
+
+from app.auth import require_user, require_admin
 
 from app.services.scoring_engine import invalidate_config_cache
 from app.services.keyword_analyzer import invalidate_keyword_cache
@@ -164,7 +166,7 @@ def _validate_country_weights(cfg: dict) -> list:
 # ═══════════════════════════════════════════
 
 @router.get("/config")
-def get_config():
+def get_config(current_user=Depends(require_user)):
     """获取完整的评分系统配置（industry_config + country_weights）"""
     return {
         "industry_config": _read_json(_INDUSTRY_CONFIG_PATH),
@@ -177,7 +179,7 @@ def get_config():
 # ═══════════════════════════════════════════
 
 @router.put("/config")
-def save_config(data: dict = Body(...)):
+def save_config(data: dict = Body(...), admin=Depends(require_admin)):
     """
     保存 industry_config.json
     接收完整的配置对象，校验后写入磁盘并清除缓存
@@ -200,7 +202,7 @@ def save_config(data: dict = Body(...)):
 # ═══════════════════════════════════════════
 
 @router.put("/config/country-weights")
-def save_country_weights(data: dict = Body(...)):
+def save_country_weights(data: dict = Body(...), admin=Depends(require_admin)):
     """
     保存 country_weights.json
     接收完整的国家权重对象，校验后写入磁盘并清除缓存

@@ -34,9 +34,11 @@
 <!-- 工具栏 -->
 <div class="toolbar">
     <button class="btn primary" id="uploadBtn"><i class="bi bi-upload"></i> 上传文件</button>
+    <button class="btn" id="uploadDirBtn"><i class="bi bi-folder-symlink"></i> 上传文件夹</button>
     <button class="btn" id="mkdirBtn"><i class="bi bi-folder-plus"></i> 新建文件夹</button>
     <button class="btn" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
     <input type="file" id="fileInput" multiple class="hidden">
+    <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
     <div class="filter">
         <input type="text" id="filterInput" placeholder="筛选当前目录文件…">
     </div>

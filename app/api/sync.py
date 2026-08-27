@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db, Customer, SearchTask, SearchCache, WebsiteCache, AnalysisCache
+from app.auth import require_admin
 from app.services.deduplication import find_existing_customer
 from app.services.customer_email_service import upsert_customer_email
 
@@ -52,6 +53,7 @@ def _get_db_path():
 def export_all_data(
     mode: str = Query("standard", description="导出模式: standard(瘦身,默认)/full(完整含缓存原文)"),
     db: Session = Depends(get_db),
+    admin=Depends(require_admin),
 ):
     """
     导出数据为 JSON（多设备同步）
@@ -330,6 +332,7 @@ def _merge_imported_emails(db: Session, customer: Customer, c_data: dict) -> int
 def import_sync_data(
     data: dict,
     db: Session = Depends(get_db),
+    admin=Depends(require_admin),
 ):
     """
     导入同步数据（JSON 格式，由 /sync/export 生成）
@@ -639,7 +642,7 @@ def import_sync_data(
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/sync/backups")
-def list_backups():
+def list_backups(admin=Depends(require_admin)):
     """列出所有数据库备份文件"""
     backup_dir = _ensure_backup_dir()
     backups = []
@@ -656,7 +659,7 @@ def list_backups():
 
 
 @router.post("/sync/backup")
-def create_backup():
+def create_backup(admin=Depends(require_admin)):
     """创建数据库备份（带时间戳）"""
     db_path = _get_db_path()
     if not db_path.exists():
@@ -683,7 +686,10 @@ def create_backup():
 
 
 @router.post("/sync/restore")
-def restore_backup(name: str = Query(..., description="备份文件名，如 backup_20260101_120000.db")):
+def restore_backup(
+    name: str = Query(..., description="备份文件名，如 backup_20260101_120000.db"),
+    admin=Depends(require_admin),
+):
     """从备份文件恢复数据库"""
     backup_dir = _ensure_backup_dir()
     backup_file = backup_dir / name

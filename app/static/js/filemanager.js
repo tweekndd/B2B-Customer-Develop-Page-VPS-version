@@ -267,27 +267,29 @@
     a.remove();
   }
 
-  // ── 上传 ──────────────────────────────────────────────────
+  // ── 上传（支持文件与整个文件夹；文件夹/拖拽时文件带 webkitRelativePath） ──
   function uploadFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    files.forEach((f) => uploadOne(f));
+    files.forEach((f) => uploadOne(f, f.webkitRelativePath || f.name));
   }
 
-  async function uploadOne(file) {
+  async function uploadOne(file, relPath) {
     const item = document.createElement("div");
     item.className = "upload-item";
     item.innerHTML =
       '<div class="u-name"><span></span><span class="u-pct">0%</span></div>' +
       '<div class="u-bar"><div class="fill" style="width:0%"></div></div>';
-    item.querySelector(".u-name span").textContent = file.name;
+    item.querySelector(".u-name span").textContent = relPath;
+    item.querySelector(".u-name span").title = relPath;
     $("#uploadList").appendChild(item);
     const fill = item.querySelector(".fill");
     const pct = item.querySelector(".u-pct");
 
     try {
       const form = new FormData();
-      form.append("files", file, file.name);
+      // 以相对路径作为 multipart 文件名，后端据此重建目录结构
+      form.append("files", file, relPath);
       const xhr = new XMLHttpRequest();
       const res = await new Promise((resolve, reject) => {
         xhr.open("POST", "/file/api/upload?path=" + encodeURIComponent(state.path));
@@ -473,6 +475,10 @@
     // 上传按钮
     $("#uploadBtn").addEventListener("click", () => $("#fileInput").click());
     $("#fileInput").addEventListener("change", (e) => { uploadFiles(e.target.files); e.target.value = ""; });
+
+    // 上传文件夹按钮（webkitdirectory 选择整个目录，文件自带相对路径）
+    $("#uploadDirBtn").addEventListener("click", () => $("#folderInput").click());
+    $("#folderInput").addEventListener("change", (e) => { uploadFiles(e.target.files); e.target.value = ""; });
 
     // 拖拽上传
     ["dragenter", "dragover"].forEach((evt) =>

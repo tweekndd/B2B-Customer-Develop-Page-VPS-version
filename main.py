@@ -279,7 +279,7 @@ async def detail_page(request: Request, customer_id: int):
 
 @app.get("/map")
 async def map_page(request: Request):
-    return _render(request, "map.html", active_nav="map")
+    return _login_required_page(request, "map.html", active_nav="map")
 
 
 # ── 需要登录的页面 ──

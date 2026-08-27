@@ -256,8 +256,8 @@ async def run_search_task(task_id: int):
                             task_db.commit()
                             return {"type": "duplicate", "domain": domain}
 
-                        # 自动进入V1分析流程
-                        await _auto_analyze_and_save(
+                        # 自动进入V1分析流程（返回实际创建状态，避免内部去重仍被计为新增）
+                        save_status = await _auto_analyze_and_save(
                             db=task_db,
                             domain=domain,
                             country=task.country,
@@ -266,6 +266,8 @@ async def run_search_task(task_id: int):
                             task_id=task_id,
                             user_id=user_id,
                         )
+                        if save_status == "skipped":
+                            return {"type": "duplicate", "domain": domain}
                         return {"type": "new", "domain": domain}
                     except Exception as e:
                         logger.error(f"分析失败 {domain}: {str(e)[:100]}")
@@ -324,11 +326,15 @@ async def _auto_analyze_and_save(
     title: str,
     task_id: Optional[int] = None,
     user_id: Optional[int] = None,
-):
+) -> str:
     """
     自动执行完整的V1分析流程：
     官网抓取(缓存) -> 邮箱提取 -> 关键词分析 -> AI分析(缓存) -> 规则评分 -> 保存
     自动去重：按域名和公司名检查，已存在则跳过分析
+
+    Returns:
+        "created": 客户记录已真实写入数据库（含抓取/AI失败但已建行的场景）
+        "skipped": 内部去重判定已存在（或并发唯一约束冲突），未创建任何记录
     """
     website = f"https://{domain}"
     now = datetime.datetime.utcnow()
@@ -350,7 +356,7 @@ async def _auto_analyze_and_save(
             existing.first_found_at = now
         db.commit()
         logger.info(f"跳过重复客户（已存在）: {domain} / {title[:40]}")
-        return
+        return "skipped"
 
     # 创建新客户记录（并发安全：捕获唯一约束冲突）
     customer = Customer(
@@ -370,7 +376,7 @@ async def _auto_analyze_and_save(
         # 并发场景下可能触发唯一约束冲突（另一个任务已创建同域名客户）
         db.rollback()
         logger.info(f"并发去重: {domain} 已被其他任务创建，跳过")
-        return
+        return "skipped"
 
     # 步骤1：官网抓取（检查缓存）
     cached_website = get_website_cache(db, domain)
@@ -396,7 +402,7 @@ async def _auto_analyze_and_save(
             # 没有官网内容就不继续了
             customer.analyzed_at = datetime.datetime.utcnow()
             db.commit()
-            return
+            return "created"
 
     if website_text:
         # V5.3 阶段3：主表不再保存大字段 website_text（由快照表承接）
@@ -412,7 +418,7 @@ async def _auto_analyze_and_save(
             logger.info(f"停止信号已触发，跳过 {domain} 的AI分析")
             customer.analyzed_at = datetime.datetime.utcnow()
             db.commit()
-            return
+            return "created"
 
         # 步骤2：邮箱提取（V5.1：写入 CustomerEmail 表并同步 JSON 视图）
         emails = extract_emails_from_text(website_text)
@@ -435,7 +441,7 @@ async def _auto_analyze_and_save(
                 logger.info(f"停止信号已触发，跳过 {domain} 的AI分析")
                 customer.analyzed_at = datetime.datetime.utcnow()
                 db.commit()
-                return
+                return "created"
 
             ai_result = await retry_async(
                 analyze_company,
@@ -504,6 +510,7 @@ async def _auto_analyze_and_save(
     customer.analyzed_at = datetime.datetime.utcnow()
     db.commit()
     logger.info(f"新公司自动分析完成: {domain} (评分: {customer.total_score})")
+    return "created"
 
 
 def get_paused_tasks(db: Session) -> List[SearchTask]:

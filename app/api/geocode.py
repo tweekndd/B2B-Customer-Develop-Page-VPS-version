@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db, Customer
+from app.auth import require_user
 from app.services.geocoding_service import geocode_customer, batch_geocode
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,11 @@ def _run_batch_geocode(task_id: str):
 
 
 @router.post("/customers/geocode/batch")
-def trigger_batch_geocode(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def trigger_batch_geocode(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_user),
+):
     """
     触发批量地理编码任务（异步后台执行）。
     返回 task_id 供前端轮询查询进度。
@@ -48,7 +53,7 @@ def trigger_batch_geocode(background_tasks: BackgroundTasks, db: Session = Depen
 
 
 @router.get("/customers/geocode/status/{task_id}")
-def get_geocode_status(task_id: str):
+def get_geocode_status(task_id: str, current_user=Depends(require_user)):
     """查询批量地理编码任务状态"""
     task = _batch_tasks.get(task_id)
     if not task:
@@ -57,7 +62,11 @@ def get_geocode_status(task_id: str):
 
 
 @router.post("/customers/{customer_id}/geocode")
-def trigger_single_geocode(customer_id: int, db: Session = Depends(get_db)):
+def trigger_single_geocode(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_user),
+):
     """
     对单个客户进行地理编码。
     """
@@ -95,6 +104,7 @@ def get_map_data(
     limit: int = Query(5000, ge=1, le=50000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    current_user=Depends(require_user),
 ):
     """
     获取地图可视化数据（支持分页）。
