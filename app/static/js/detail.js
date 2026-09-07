@@ -1488,4 +1488,75 @@ document.addEventListener('DOMContentLoaded', () => {
     checkHunterConfigDetail();
     loadLinkedinProfiles();
     loadEmailActivities();
+    loadOutreachTemplates();
 });
+
+// ═══════════════════════════════════════════
+// Phase1 外联审批草稿（Prompt 模板 → 审批队列）
+// ═══════════════════════════════════════════
+
+async function loadOutreachTemplates() {
+    const sel = document.getElementById('outreachPromptTemplate');
+    if (!sel) return;
+    try {
+        const r = await _fetchWithTimeout('/api/prompts?status=active');
+        const templates = r.templates || [];
+        templates.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = `${t.name}（${t.freedom_level}·${t.language}）`;
+            sel.appendChild(opt);
+        });
+        if (templates.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = '（暂无 active 模板，请到 Prompt 管理页发布）';
+            sel.appendChild(opt);
+        }
+    } catch (e) { console.warn('加载模板失败', e); }
+}
+
+async function generateOutreachDraft() {
+    const btn = document.getElementById('btnOutreachDraft');
+    const loading = document.getElementById('outreachDraftLoading');
+    const result = document.getElementById('outreachDraftResult');
+    const templateId = document.getElementById('outreachPromptTemplate').value;
+    const productName = document.getElementById('outreachProductName').value.trim();
+    const keywords = document.getElementById('emailDraftKeywords').value.trim();
+
+    btn.disabled = true;
+    loading.classList.remove('d-none');
+    result.classList.add('d-none');
+    try {
+        const payload = { auto_submit: true };
+        if (templateId) payload.template_id = Number(templateId);
+        if (productName) payload.product_name = productName;
+        if (keywords) payload.product_keywords = keywords.split(',').map(s => s.trim()).filter(Boolean);
+        const r = await _fetchWithTimeout(`/api/customers/${customerId}/outreach/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }, 60000);
+        const d = r.draft || {};
+        const risks = (d.risk_flags || []).map(x => `<span class="badge bg-danger me-1">${_esc(x)}</span>`).join('');
+        result.innerHTML = `
+            <div class="alert alert-success py-2 mb-2"><i class="bi bi-check-circle"></i> 草稿已生成并送审（草稿 #${d.id}）</div>
+            <div class="border rounded p-2 mb-2">
+                <div class="fw-bold small">${_esc(d.subject || '')}</div>
+                <div class="text-secondary small" style="white-space:pre-wrap;max-height:150px;overflow:auto;">${_esc(d.body || '')}</div>
+            </div>
+            <div class="mb-1">${risks || '<span class="text-success small"><i class="bi bi-shield-check"></i> 无风险标记</span>'}</div>
+            <div class="small text-secondary">模型：${_esc(d.model || '-')} · 溯源：${_esc((d.facts_used || []).join('；') || '无')}</div>
+            <a class="btn btn-sm btn-outline-info mt-2" href="/outreach" onclick="navigate(event,'/outreach')">
+                <i class="bi bi-inbox"></i> 前往邮件审核审批发送
+            </a>`;
+        result.classList.remove('d-none');
+        showToast(`草稿 #${d.id} 已生成并进入待审批`, 'success');
+    } catch (err) {
+        result.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle"></i> ${_esc(err.message)}</div>`;
+        result.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        loading.classList.add('d-none');
+    }
+}

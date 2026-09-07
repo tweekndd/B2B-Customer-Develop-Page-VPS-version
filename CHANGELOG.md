@@ -1,5 +1,31 @@
 # 更新日志
 
+## v6.1 Phase1（2026-09-07）
+
+### 📧 邮件外联基础（方案 Phase1 · 10 项全落地）
+
+按《AI 客户开发与邮件外联系统总体开发方案》Phase1「单邮箱/单产品/单国家半自动闭环」执行，交付链路：**生成草稿 → 人工确认 → Himalaya 发信 → 保存发送记录**，且生成全程可溯源（哪个 Prompt/版本/客户事实/模型/为何需人工审核）。
+
+- **Himalaya Adapter（#1）** `app/services/himalaya_service.py`：封装 himalaya v2 CLI —— 按 `mail_sender_accounts` 生成 `config.toml`（`[accounts.main]`，SMTP 必需/IMAP 预留，文件权限 0600 落 DATA_DIR）；发送走 Python `email` 构造 RFC5322 MIME（我方生成 RFC Message-ID/线程头）经子进程 `himalaya -c <cfg> message send`（stdin=MIME），成功后回填 provider message id；连接测试用 stdlib smtplib/imaplib（无需 himalaya 也可即时验证凭据）；himalaya 未安装时抛 `HimalayaUnavailableError`（明确降级提示，不影响草稿/审批/任务链路）
+- **发件账户（用户配置 + 加密）** `mail_sender_accounts` 表 + `app/services/mail_sender_service.py` + API `/api/mail-sender-accounts`：设置页填 SMTP 主机/端口/加密(starttls/tls/none)/登录名/密码（Fernet 加密）+ 可选 IMAP + 每日发送上限，支持「测试连接」（不发送真信）与增删改
+- **Prompt 模板/版本/变量白名单（#2）** `prompt_templates` / `prompt_versions` 表 + `app/services/prompt_service.py`：CRUD、draft/active/archived 状态、发布生成不可变版本快照、历史回滚（回滚=复制为草稿→发布新版本，历史只读）、基于版本复制草稿；模板引用变量必须声明于 `variables_schema`（白名单，含 `customer.*` 事实与 `system.*` 保留变量，未声明变量拒绝渲染/保存，防 Prompt 注入）
+- **生成记录与版本溯源（#3）** `generation_runs` 表：每次生成保存客户事实快照、渲染提示词哈希、模型/Provider、原始输出、结构化输出、guard 检查、风险标记 —— 回答「用了哪个 Prompt/版本/哪些事实/哪个模型」
+- **L0/L1/L2 AI 自由度配置（#4，生产默认 L1）**：模板级 `freedom_level`（L0 严格模板/L1 受控改写/L2 个性化创作），按等级注入不同输出边界；内置种子模板「通用首封开发信（默认 L1）」（启动幂等创建）
+- **发信草稿与审批状态（#5）** `outreach_drafts` 表 + 状态机 draft→pending→approved→sending→sent / rejected（可修改重提）/ failed / cancelled；生成、编辑、提交、审批（绑定发件账户）、拒绝、取消全链路
+- **发送幂等键（#6）**：任务级 `idempotency_key = send:draft:{id}` + 日志级 `draft+收件人+主题哈希` 双保险：成功任务永不重发；进行中/待重试去重；最终失败/取消允许人工重试
+- **发送日志与 provider message ID（#7）** `outreach_send_logs` 表：provider/internet Message-ID、状态 queued/sending/sent/failed、错误码与信息；发送成功同步回写客户状态「已发邮件」+ `last_email_sent_at` + V5.2 `CustomerEmailActivity` 发信记录（详情页发信记录 tab 可见）
+- **每日发送上限（#8）**：账户级 `daily_limit`（默认 30），发送前按 UTC 自然日计数，超限 429
+- **全局退订名单（#9）** `unsubscribe_blacklist` 表：邮箱/域名级禁止联系（reason=unsubscribe/bounce/complaint/manual），审批与发送两个时点都强制校验；API + 审核页维护
+- **Worker 与任务表（#10）** `automation_tasks` + `app/workers/`（`runner.py` 常驻独立进程 `python -m app.workers.runner`、`task_handlers.py` send_email handler、原子抢占/指数退避/可重试 vs 不可重试错误分类）；Web 进程可启用应用内轻量 Worker（`INAPP_WORKER=1` 默认）作无独立 worker 兜底，与独立 worker 共存安全（抢占原子）
+- **API**：`/api/prompts*`、`/api/outreach/*`（drafts/approve/reject/send/logs/blacklist/tasks）、`/api/customers/{id}/outreach/generate`、`/api/mail-sender-accounts*`
+- **前端**：新页面「邮件审核」(outreach.html+js：待审批卡片/全部草稿/发送记录/任务中心/黑名单/说明)、「Prompt 管理」(prompts.html+js：模板列表/编辑器/变量帮助/版本历史)；客户详情页新增「外联审批草稿」区（选模板生成并送审）；侧边栏新增「邮件外联」分组；设置页新增「发件账户（Himalaya）」卡
+- **模型/迁移**：新增 7 张表（prompt_templates/prompt_versions/generation_runs/mail_sender_accounts/outreach_drafts/outreach_send_logs/unsubscribe_blacklist/automation_tasks），Alembic `002_phase1_outreach` 迁移（生产 `alembic upgrade head`）；`EXPECTED_TABLES` 29 张
+- **部署**：Dockerfile 安装 himalaya v2.1.0（`HIMALAYA_VERSION`/`HIMALAYA_ARCH` 可配）；docker-compose 新增 `worker` 服务（app 环境 `INAPP_WORKER=0`）；`.env.example` 补 `INAPP_WORKER`/`WORKER_POLL_SECONDS`/`HIMALAYA_BIN` 说明
+
+**验证**：`pytest tests/` 全绿（新增 `tests/test_phase1_outreach.py` 32 项（服务层：渲染白名单/模板版本发布回滚/guard/Himalaya 配置与 MIME/草稿状态机/黑名单/幂等/任务抢占与重试）+ `tests/test_phase1_api_e2e.py` 2 项（API E2E：生成→审批→发送→日志/客户联动→幂等重放））。已有库升级：`alembic upgrade head`（或开发库 `DB_AUTO_CREATE=1` 自动建表）。真实发送需：设置页配置发件账户（测试连接）→ 服务器安装 himalaya（本机 `brew install himalaya` / Docker 已内置）→ Prompt 管理页发布 active 模板。
+
+---
+
 ## v6.0 Phase0（2026-09-07）
 
 ### 🛡️ 生产基础加固（方案 Phase0）

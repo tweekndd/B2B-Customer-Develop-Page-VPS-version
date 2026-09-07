@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}邮件审核 - AI Trade Customer Analyzer{% endblock %}
+{% block page_title %}<i class="bi bi-send-fill me-2"></i>邮件审核（外联）{% endblock %}
+
+{% block top_bar_actions %}
+<button class="btn btn-outline-primary btn-sm" onclick="loadAll()" title="刷新">
+    <i class="bi bi-arrow-clockwise"></i> 刷新
+</button>
+{% endblock %}
+
+{% block content %}
+<!-- 顶部快捷状态 -->
+<div class="row g-3 mb-4" id="statsRow">
+    <div class="col-md-3">
+        <div class="card border-0 stats-card" data-animate>
+            <div class="card-body text-center py-3">
+                <div class="stats-icon mb-2"><i class="bi bi-hourglass-split" style="color: var(--warm-500); font-size: 1.6rem;"></i></div>
+                <div class="stats-number" id="statPending" style="font-weight: 700;">-</div>
+                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">待审批</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 stats-card" data-animate>
+            <div class="card-body text-center py-3">
+                <div class="stats-icon mb-2"><i class="bi bi-check2-circle" style="color: var(--success); font-size: 1.6rem;"></i></div>
+                <div class="stats-number" id="statSent" style="font-weight: 700;">-</div>
+                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">今日已发</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 stats-card" data-animate>
+            <div class="card-body text-center py-3">
+                <div class="stats-icon mb-2"><i class="bi bi-file-earmark-text" style="color: var(--accent-500); font-size: 1.6rem;"></i></div>
+                <div class="stats-number" id="statDrafts" style="font-weight: 700;">-</div>
+                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">草稿</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 stats-card" data-animate>
+            <div class="card-body text-center py-3">
+                <div class="stats-icon mb-2"><i class="bi bi-list-check" style="color: var(--info-color); font-size: 1.6rem;"></i></div>
+                <div class="stats-number" id="statFailed" style="font-weight: 700;">-</div>
+                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">发送失败/重试</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tab 导航 -->
+<ul class="nav nav-tabs mb-3" role="tablist" id="outreachTabs">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabPending" type="button"><i class="bi bi-hourglass-split me-1"></i>待审批</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAll" type="button"><i class="bi bi-envelope-paper me-1"></i>全部草稿</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabLogs" type="button"><i class="bi bi-send-check me-1"></i>发送记录</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTasks" type="button"><i class="bi bi-cpu me-1"></i>任务中心</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabBlacklist" type="button"><i class="bi bi-slash-circle me-1"></i>禁止联系名单</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHelp" type="button"><i class="bi bi-question-circle me-1"></i>说明</button></li>
+</ul>
+
+<div class="tab-content">
+    <!-- 待审批 -->
+    <div class="tab-pane fade show active" id="tabPending">
+        <div id="pendingList" class="row g-3"></div>
+    </div>
+    <!-- 全部草稿 -->
+    <div class="tab-pane fade" id="tabAll">
+        <div class="mb-3 d-flex gap-2 flex-wrap">
+            <select id="draftStatusFilter" class="form-select" style="width:auto;" onchange="loadAllDrafts()">
+                <option value="">全部状态</option>
+                <option value="draft">草稿</option>
+                <option value="pending">待审批</option>
+                <option value="approved">已批准</option>
+                <option value="sent">已发送</option>
+                <option value="rejected">已拒绝</option>
+                <option value="failed">失败</option>
+                <option value="cancelled">已取消</option>
+            </select>
+            <input type="text" id="draftCustomerId" class="form-control" placeholder="客户ID" style="width:110px;">
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadAllDrafts()"><i class="bi bi-search"></i></button>
+        </div>
+        <div class="table-responsive"><table class="table table-hover align-middle">
+            <thead><tr><th>ID</th><th>客户</th><th>主题</th><th>状态</th><th>模型/溯源</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody id="allDraftsBody"></tbody>
+        </table></div>
+    </div>
+    <!-- 发送记录 -->
+    <div class="tab-pane fade" id="tabLogs">
+        <div class="table-responsive"><table class="table table-hover align-middle">
+            <thead><tr><th>ID</th><th>草稿</th><th>收件人</th><th>主题</th><th>状态</th><th>Message-ID</th><th>发送时间</th><th>错误</th></tr></thead>
+            <tbody id="sendLogsBody"></tbody>
+        </table></div>
+    </div>
+    <!-- 任务中心 -->
+    <div class="tab-pane fade" id="tabTasks">
+        <div class="mb-2 text-secondary small">Worker 任务队列：审批通过后系统自动入队发送任务；无独立 Worker 时由应用内兜底执行。</div>
+        <div class="table-responsive"><table class="table table-hover align-middle">
+            <thead><tr><th>ID</th><th>类型</th><th>状态</th><th>尝试</th><th>错误</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody id="tasksBody"></tbody>
+        </table></div>
+    </div>
+    <!-- 黑名单 -->
+    <div class="tab-pane fade" id="tabBlacklist">
+        <div class="card border-0 mb-3">
+            <div class="card-body p-3">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-3"><input type="text" id="blEmail" class="form-control" placeholder="邮箱（如 sales@x.com）"></div>
+                    <div class="col-md-3"><input type="text" id="blDomain" class="form-control" placeholder="或域名（如 x.com）"></div>
+                    <div class="col-md-2">
+                        <select id="blReason" class="form-select">
+                            <option value="manual">人工</option>
+                            <option value="unsubscribe">退订</option>
+                            <option value="bounce">退信</option>
+                            <option value="complaint">投诉</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3"><input type="text" id="blNote" class="form-control" placeholder="备注（可选）"></div>
+                    <div class="col-md-1"><button class="btn btn-accent w-100" onclick="addBlacklist()"><i class="bi bi-plus-lg"></i></button></div>
+                </div>
+            </div>
+        </div>
+        <div class="table-responsive"><table class="table table-hover align-middle">
+            <thead><tr><th>ID</th><th>邮箱</th><th>域名</th><th>原因</th><th>备注</th><th>时间</th><th>操作</th></tr></thead>
+            <tbody id="blacklistBody"></tbody>
+        </table></div>
+    </div>
+    <!-- 说明 -->
+    <div class="tab-pane fade" id="tabHelp">
+        <div class="card border-0">
+            <div class="card-body p-4" style="line-height:1.9; color: var(--text-secondary); font-size: 0.92rem;">
+                <h6 class="fw-bold text-white">Phase1 外联闭环</h6>
+                <p>搜索客户 → 客户详情页「AI 开发信生成」（Prompt 模板）→ 草稿提交审批 → 此处人工确认 →
+                系统经 Himalaya 发送 → 保存发送记录与 Message-ID，客户状态自动联动「已发邮件」。</p>
+                <h6 class="fw-bold text-white mt-3">人工确认边界</h6>
+                <p>首次发信、正式报价等关键动作默认需要人工审批（本页「待审批」），AI 只负责生成与分类。</p>
+                <h6 class="fw-bold text-white mt-3">幂等与合规</h6>
+                <p>每封草稿带幂等键，重复点击发送不会二次发信；发送前自动检查<b>禁止联系名单</b>与<b>每日上限</b>。
+                退信/投诉/退订请第一时间加入黑名单。</p>
+                <h6 class="fw-bold text-white mt-3">配置入口</h6>
+                <p>「AI 设置」页配置发件账户（SMTP/IMAP，可测试连接）；「Prompt 管理」页维护模板/版本/变量白名单。
+                首次使用请先在客户详情页生成草稿（需已发布 active 的 Prompt 模板）。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 审批弹窗 -->
+<div class="modal fade" id="reviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">审批草稿 #<span id="rmDraftId"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning py-2 small" id="rmRiskBox" style="display:none;"></div>
+                <div class="mb-2"><strong>客户 ID：</strong><span id="rmCustomer"></span>
+                    <span class="badge bg-info text-dark" id="rmModel"></span>
+                    <span class="badge bg-secondary" id="rmLang"></span></div>
+                <div class="mb-3"><label class="form-label fw-bold">收件人</label>
+                    <input type="text" class="form-control" id="rmRecipient" placeholder="默认取客户主邮箱"></div>
+                <div class="mb-3"><label class="form-label fw-bold">主题</label>
+                    <input type="text" class="form-control" id="rmSubject"></div>
+                <div class="mb-3"><label class="form-label fw-bold">正文</label>
+                    <textarea class="form-control" id="rmBody" rows="10" style="font-family: var(--bs-font-monospace);"></textarea></div>
+                <div class="mb-2 small text-secondary"><strong>使用的 Prompt 事实（溯源）：</strong><span id="rmFacts"></span></div>
+                <div class="mb-3"><label class="form-label fw-bold">发件账户</label>
+                    <select class="form-select" id="rmSenderAccount"></select></div>
+                <div class="mb-2"><label class="form-label fw-bold">审批备注 / 拒绝原因</label>
+                    <input type="text" class="form-control" id="rmNote" placeholder="批准可留空；拒绝时必填"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline-danger" onclick="rejectDraft()"><i class="bi bi-x-lg"></i> 拒绝</button>
+                <button class="btn btn-outline-secondary" onclick="saveDraftEdit()"><i class="bi bi-pencil"></i> 仅保存修改</button>
+                <button class="btn btn-accent" onclick="approveDraft()"><i class="bi bi-check-lg"></i> 批准并发送</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/outreach.js"></script>
+{% endblock %}

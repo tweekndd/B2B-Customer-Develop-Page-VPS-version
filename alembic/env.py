@@ -48,6 +48,15 @@ from app.models import (  # noqa: F401
     LinkedInOAuthToken,
     MailAccount,
     CustomerEmailActivity,
+    # Phase1（邮件外联基础）新增
+    PromptTemplate,
+    PromptVersion,
+    GenerationRun,
+    MailSenderAccount,
+    OutreachDraft,
+    OutreachSendLog,
+    UnsubscribeBlacklist,
+    AutomationTask,
 )
 
 target_metadata = Base.metadata

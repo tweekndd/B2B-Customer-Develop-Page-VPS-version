@@ -412,6 +412,38 @@
                         </div>
                     </div>
                     <div id="emailDraftResult" class="mt-3 d-none"></div>
+
+                    <hr class="my-3" style="border-color: var(--border-color);">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                        <span class="small fw-bold text-info"><i class="bi bi-shield-check"></i> 外联审批草稿（Phase1 · Prompt 模板 · 人工确认后发送）</span>
+                    </div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-7">
+                            <label class="form-label">Prompt 模板（留空=默认 active）</label>
+                            <select class="form-select form-select-sm" id="outreachPromptTemplate">
+                                <option value="">自动选择最新 active 模板</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label">产品名称（可选）</label>
+                            <input type="text" class="form-control form-control-sm" id="outreachProductName" placeholder="如 Water Pump" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-info btn-sm" onclick="generateOutreachDraft()" id="btnOutreachDraft">
+                            <i class="bi bi-send-plus me-1"></i>生成外联草稿并送审
+                        </button>
+                        <a class="btn btn-sm btn-outline-info ms-1" href="/outreach" onclick="navigate(event, '/outreach')">
+                            <i class="bi bi-inbox"></i> 去邮件审核
+                        </a>
+                    </div>
+                    <div id="outreachDraftLoading" class="mt-2 d-none">
+                        <div class="d-flex align-items-center gap-2 text-muted small">
+                            <div class="spinner-border spinner-border-sm"></div>
+                            <span>正在按 Prompt 模板生成（AI 分析约 20-40 秒）...</span>
+                        </div>
+                    </div>
+                    <div id="outreachDraftResult" class="mt-2 small d-none"></div>
                 </div>
             </div>
         </div>

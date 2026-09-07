@@ -21,6 +21,15 @@ from .outreach import MailAccount, CustomerEmailActivity  # noqa: F401
 from .identity import User, UserApiConfig, LinkedInOAuthToken  # noqa: F401
 from .cache import GeocodeCache  # noqa: F401
 from .storage import StorageObject  # noqa: F401
+# Phase1（邮件外联基础）新增
+from .prompts import PromptTemplate, PromptVersion, GenerationRun  # noqa: F401
+from .outreach_send import (  # noqa: F401
+    MailSenderAccount,
+    OutreachDraft,
+    OutreachSendLog,
+    UnsubscribeBlacklist,
+)
+from .automation import AutomationTask  # noqa: F401
 
 
 def init_db():

@@ -1,4 +1,4 @@
-﻿"""
+"""
 模型拆分完整性测试（V5.3 重构）
 
 1. Base.metadata 必须注册全部 17 张表（防拆分后漏导入）
@@ -97,6 +97,15 @@ EXPECTED_TABLES = {
     "score_snapshots",
     # Phase0：对象存储索引
     "storage_objects",
+    # Phase1（邮件外联基础）
+    "prompt_templates",
+    "prompt_versions",
+    "generation_runs",
+    "mail_sender_accounts",
+    "outreach_drafts",
+    "outreach_send_logs",
+    "unsubscribe_blacklist",
+    "automation_tasks",
 }
 
 

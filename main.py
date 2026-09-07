@@ -68,6 +68,17 @@ async def lifespan(app: FastAPI):
 
         # 启动时检查管理员账号
         ensure_admin_exists(db_session)
+
+        # Phase1：确保存在默认 Prompt 模板（无模板时幂等创建，用户可编辑/归档）
+        try:
+            from app.services.prompt_service import ensure_seed_templates
+            ensure_seed_templates(db_session)
+            from app.database import PromptTemplate
+            _prompt_count = db_session.query(PromptTemplate).count()
+            print(f"  Prompt 模板: {_prompt_count} 个")
+        except Exception as e:
+            print(f"  Prompt 种子初始化跳过: {e}")
+
         db_session.close()
     except Exception as e:
         print(f"  初始化跳过: {e}")
@@ -103,9 +114,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  [缓存] 后台任务启动跳过: {e}")
 
+    # Phase1：可选的应用内 Worker（无独立 worker 进程时，定期消费 automation_tasks）
+    # 默认开启（WAIT：部署独立 Worker 时设置 INAPP_WORKER=0 避免重复消费；
+    # 任务抢占是原子的，重复消费不会造成重复发送）
+    _app_worker_task = None
+    try:
+        import os as _os
+        if _os.environ.get("INAPP_WORKER", "1").strip() == "1":
+            from app.workers.runner import inapp_worker_loop
+            _app_worker_task = asyncio.create_task(inapp_worker_loop())
+            print("  [Worker] 应用内任务 Worker 已启动（INAPP_WORKER=0 可关闭）")
+    except Exception as e:
+        print(f"  [Worker] 应用内任务启动跳过: {e}")
+
     yield
 
-    for _task in (_mail_worker_task, _cache_cleanup_task):
+    for _task in (_mail_worker_task, _cache_cleanup_task, _app_worker_task):
         if _task is not None:
             _task.cancel()
             try:
@@ -315,6 +339,18 @@ async def config_page(request: Request):
 async def settings_page(request: Request):
     """AI 与 API 设置页（Round 3/4：用户级 API Key 管理）"""
     return _login_required_page(request, "settings.html", active_nav="settings")
+
+
+@app.get("/outreach")
+async def outreach_page(request: Request):
+    """邮件审核页（Phase1：外联草稿审批 + 发送记录 + 退订名单）"""
+    return _login_required_page(request, "outreach.html", active_nav="outreach")
+
+
+@app.get("/prompts")
+async def prompts_page(request: Request):
+    """Prompt 管理页（Phase1：模板/版本/变量白名单/发布回滚）"""
+    return _login_required_page(request, "prompts.html", active_nav="prompts")
 
 
 @app.get("/hunter")

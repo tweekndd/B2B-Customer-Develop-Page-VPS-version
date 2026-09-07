@@ -547,12 +547,9 @@ class TestUserConfigAPI:
 
 
 # ── 清理测试数据库 ──
-
-def teardown_module(module):
-    """模块结束时删除测试数据库文件"""
-    db_path = _TEST_DB
-    try:
-        if os.path.exists(db_path):
-            os.remove(db_path)
-    except PermissionError:
-        pass  # Windows 可能锁文件，忽略
+# 注意：不在本模块结束时删除 tests/test_api.db —— 该文件被多个测试模块共享
+# （test_customer_email_management / test_intelligence / test_mail_sync /
+#  test_models_metadata 等均以各自 engine 指向同一文件）。若在此 unlink，
+# 其它模块在收集期创建并保活的 SQLite 连接池将指向已删除的 inode，
+# 后续 create_all 触发 sqlite3.OperationalError: attempt to write a readonly database。
+# 清理统一放到 conftest.py 的 pytest_sessionfinish（整个会话结束后执行）。

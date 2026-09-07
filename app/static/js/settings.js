@@ -662,6 +662,7 @@ async function loadAll() {
         showToast('加载配置失败: ' + err.message, 'danger');
     }
     await loadSearchEngine();
+    loadSenderAccounts();
 }
 
 document.addEventListener('DOMContentLoaded', loadAll);
@@ -682,5 +683,179 @@ window.connectGmail = connectGmail;
 window.syncMailAccount = syncMailAccount;
 window.renewMailAccount = renewMailAccount;
 window.disconnectMailAccount = disconnectMailAccount;
+
+// ═══════════════════════════════════════════
+// Phase1 发件账户（Himalaya SMTP）
+// ═══════════════════════════════════════════
+let _currentSenderAccountId = null;
+let _senderAccounts = [];
+
+async function loadSenderAccounts() {
+    try {
+        const r = await _fetchWithTimeout('/api/mail-sender-accounts');
+        _senderAccounts = r.accounts || [];
+        renderSenderAccountList();
+        const hint = document.getElementById('senderHimalayaHint');
+        if (hint) {
+            const available = _senderAccounts.length ? _senderAccounts[0].himalaya_available : true;
+            hint.textContent = available ? '' : '⚠ 服务器未检测到 himalaya CLI，发送将等待安装';
+        }
+    } catch (err) { console.warn('加载发件账户失败', err); }
+}
+
+function renderSenderAccountList() {
+    const box = document.getElementById('senderAccountsList');
+    if (!box) return;
+    if (!_senderAccounts.length) {
+        box.innerHTML = `<div class="text-muted small border rounded p-3 text-center">尚未配置发件账户。填写上方 SMTP 信息 → 「测试连接」→「保存账户」。</div>`;
+        return;
+    }
+    box.innerHTML = `<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">
+        <thead><tr><th>邮箱</th><th>状态</th><th>每日上限</th><th>最近测试</th><th>操作</th></tr></thead>
+        <tbody>` + _senderAccounts.map(a => `
+            <tr>
+                <td>
+                    <div class="fw-bold small">${_esc(a.email_address)}</div>
+                    <div class="text-muted small">${_esc(a.smtp_host)}:${a.smtp_port} · ${_esc(a.smtp_encryption)}</div>
+                </td>
+                <td>${a.enabled
+                    ? (a.status === 'error' ? '<span class="badge bg-danger">错误</span>' : '<span class="badge bg-success">启用</span>')
+                    : '<span class="badge bg-secondary">停用</span>'}</td>
+                <td class="small">${a.daily_limit || '∞'}</td>
+                <td class="small">${a.last_test_ok === null ? '-' : (a.last_test_ok ? '<span class="text-success">通过</span>' : `<span class="text-danger" title="${_esc(a.last_error || '')}">失败</span>`)}
+                    ${a.last_test_at ? '<div class="text-muted">' + _esc(_fmtS(a.last_test_at)) + '</div>' : ''}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="editSenderAccount(${a.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteSenderAccountRow(${a.id})"><i class="bi bi-trash"></i></button>
+                </td>
+            </tr>`).join('') + `</tbody></table></div>`;
+}
+
+function editSenderAccount(id) {
+    const a = _senderAccounts.find(x => x.id === id);
+    if (!a) return;
+    _currentSenderAccountId = a.id;
+    document.getElementById('senderEmail').value = a.email_address;
+    document.getElementById('senderDisplayName').value = a.display_name || '';
+    document.getElementById('senderSmtpHost').value = a.smtp_host;
+    document.getElementById('senderSmtpPort').value = a.smtp_port;
+    document.getElementById('senderSmtpEncryption').value = a.smtp_encryption;
+    document.getElementById('senderSmtpLogin').value = a.smtp_login || '';
+    document.getElementById('senderSmtpPassword').value = '';  // 不回显密码
+    document.getElementById('senderImapHost').value = a.imap_host || '';
+    document.getElementById('senderImapPort').value = a.imap_port || 993;
+    document.getElementById('senderImapEncryption').value = a.imap_encryption || 'tls';
+    document.getElementById('senderDailyLimit').value = a.daily_limit;
+    document.getElementById('btnDeleteSender').style.display = 'inline-block';
+    document.getElementById('senderTestResult').textContent = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function resetSenderForm() {
+    _currentSenderAccountId = null;
+    ['senderEmail','senderDisplayName','senderSmtpHost','senderSmtpLogin','senderSmtpPassword','senderImapHost']
+        .forEach(idName => document.getElementById(idName).value = '');
+    document.getElementById('senderSmtpPort').value = 587;
+    document.getElementById('senderSmtpEncryption').value = 'starttls';
+    document.getElementById('senderImapPort').value = 993;
+    document.getElementById('senderImapEncryption').value = 'tls';
+    document.getElementById('senderDailyLimit').value = 30;
+    document.getElementById('btnDeleteSender').style.display = 'none';
+    document.getElementById('senderTestResult').textContent = '';
+}
+
+function collectSenderPayload() {
+    return {
+        email_address: document.getElementById('senderEmail').value.trim(),
+        display_name: document.getElementById('senderDisplayName').value.trim() || null,
+        smtp_host: document.getElementById('senderSmtpHost').value.trim(),
+        smtp_port: _num(document.getElementById('senderSmtpPort').value, 587),
+        smtp_encryption: document.getElementById('senderSmtpEncryption').value,
+        smtp_login: document.getElementById('senderSmtpLogin').value.trim() || null,
+        smtp_password: document.getElementById('senderSmtpPassword').value,
+        imap_host: document.getElementById('senderImapHost').value.trim() || null,
+        imap_port: _num(document.getElementById('senderImapPort').value, 993) || null,
+        imap_encryption: document.getElementById('senderImapEncryption').value,
+        daily_limit: _num(document.getElementById('senderDailyLimit').value, 30),
+        enabled: true,
+    };
+}
+
+async function testSenderAccount() {
+    const btn = document.getElementById('btnTestSender');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中…';
+    const resultEl = document.getElementById('senderTestResult');
+    resultEl.textContent = '';
+    const payload = collectSenderPayload();
+    if (!payload.email_address || !payload.smtp_host || !payload.smtp_password) {
+        resultEl.innerHTML = '<span class="text-warning">请先填写 发件邮箱 / SMTP 主机 / SMTP 密码</span>';
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-plug me-1"></i>测试连接';
+        return;
+    }
+    try {
+        if (_currentSenderAccountId) payload.account_id = _currentSenderAccountId;
+        const r = await _fetchWithTimeout('/api/mail-sender-accounts/test', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        }, 30000);
+        const smtp = r.smtp || {};
+        const imap = r.imap;
+        let html = smtp.ok
+            ? '<span class="text-success"><i class="bi bi-check-circle"></i> SMTP ' + _esc(smtp.message || '连接成功') + '</span>'
+            : '<span class="text-danger"><i class="bi bi-x-circle"></i> SMTP ' + _esc(smtp.message || '失败') + '</span>';
+        if (imap) html += '<br>' + (imap.ok
+            ? '<span class="text-success"><i class="bi bi-check-circle"></i> IMAP ' + _esc(imap.message || '连接成功') + '</span>'
+            : '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> IMAP ' + _esc(imap.message || '失败（可忽略，IMAP 非必填）') + '</span>');
+        resultEl.innerHTML = html;
+    } catch (err) {
+        resultEl.innerHTML = '<span class="text-danger">' + _esc(err.message) + '</span>';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-plug me-1"></i>测试连接';
+        loadSenderAccounts();
+    }
+}
+
+async function saveSenderAccount() {
+    const payload = collectSenderPayload();
+    if (!payload.email_address) { showToast('请填写发件邮箱', 'warning'); return; }
+    if (!payload.smtp_host) { showToast('请填写 SMTP 主机', 'warning'); return; }
+    if (!_currentSenderAccountId && !payload.smtp_password) { showToast('新建账户必须填写 SMTP 密码', 'warning'); return; }
+    try {
+        const url = _currentSenderAccountId ? `/api/mail-sender-accounts/${_currentSenderAccountId}` : '/api/mail-sender-accounts';
+        const method = _currentSenderAccountId ? 'PUT' : 'POST';
+        await _fetchWithTimeout(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        showToast('发件账户已保存', 'success');
+        resetSenderForm();
+        loadSenderAccounts();
+    } catch (err) { showToast('保存失败：' + err.message, 'danger'); }
+}
+
+async function deleteSenderAccountRow(id) {
+    if (!confirm('确认删除该发件账户？')) return;
+    try {
+        await _fetchWithTimeout(`/api/mail-sender-accounts/${id}`, { method: 'DELETE' });
+        showToast('已删除', 'success');
+        if (_currentSenderAccountId === id) resetSenderForm();
+        loadSenderAccounts();
+    } catch (err) { showToast('删除失败：' + err.message, 'danger'); }
+}
+
+async function deleteSenderAccountForm() {
+    if (_currentSenderAccountId) await deleteSenderAccountRow(_currentSenderAccountId);
+}
+
+function _fmtS(s) {
+    if (!s) return '';
+    return new Date(s).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+window.loadSenderAccounts = loadSenderAccounts;
+window.editSenderAccount = editSenderAccount;
+window.resetSenderForm = resetSenderForm;
+window.testSenderAccount = testSenderAccount;
+window.saveSenderAccount = saveSenderAccount;
+window.deleteSenderAccountRow = deleteSenderAccountRow;
+window.deleteSenderAccountForm = deleteSenderAccountForm;
 
 })();

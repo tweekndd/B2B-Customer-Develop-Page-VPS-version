@@ -25,6 +25,10 @@ from app.api.linkedin import router as _linkedin  # noqa: E402
 from app.api.mail_accounts import router as _mail_accounts  # noqa: E402
 from app.api.mail_activities import router as _mail_activities  # noqa: E402
 from app.api.mail_webhooks import router as _mail_webhooks  # noqa: E402
+# Phase1（邮件外联基础）新增
+from app.api.prompts import router as _prompts  # noqa: E402
+from app.api.outreach import router as _outreach  # noqa: E402
+from app.api.mail_sender_accounts import router as _mail_sender_accounts  # noqa: E402
 
 # 合并路由（子路由器无 prefix，由顶层 /api 统一提供）
 # auth 和 users 无路径冲突，放在最前面
@@ -37,6 +41,9 @@ router.include_router(_linkedin)
 router.include_router(_mail_accounts)
 router.include_router(_mail_activities)
 router.include_router(_mail_webhooks)
+router.include_router(_mail_sender_accounts)
+router.include_router(_prompts)
+router.include_router(_outreach)
 router.include_router(_customers)
 router.include_router(_discovery)
 router.include_router(_sync)

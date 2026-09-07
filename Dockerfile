@@ -15,9 +15,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 时区 / 常用工具（非必需，但方便调试）
+# Phase1：安装 Himalaya CLI（邮件外联发送通道，v2.x 官方预编译二进制）
+# 架构可用 ARG 覆盖：HIMALAYA_ARCH=x86_64 / aarch64 / armv7l / i686
+ARG HIMALAYA_VERSION=v2.1.0
+ARG HIMALAYA_ARCH=x86_64
+
+# 时区 / 常用工具 / Himalaya（非必需，但方便调试）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata \
+    ca-certificates tzdata curl \
+    && curl -fsSL "https://github.com/pimalaya/himalaya/releases/download/${HIMALAYA_VERSION}/himalaya.${HIMALAYA_ARCH}-linux.tgz" \
+       -o /tmp/himalaya.tgz \
+    && tar -xzf /tmp/himalaya.tgz -C /usr/local/bin \
+    && chmod +x /usr/local/bin/himalaya \
+    && rm -f /tmp/himalaya.tgz \
+    && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/*
 
 # 从 builder 阶段复制已安装的 Python 包
@@ -30,8 +41,8 @@ COPY . .
 # 创建非 root 用户（须先于 chown）
 RUN useradd -r -s /bin/false -d /app appuser
 
-# 创建运行时目录并授权（含 Phase0 对象存储数据目录 /app/data）
-RUN mkdir -p app/uploads app/static/css app/templates /app/data \
+# 创建运行时目录并授权（含 Phase0 对象存储数据目录 /app/data 与 himalaya 配置目录）
+RUN mkdir -p app/uploads app/static/css app/templates /app/data /app/data/himalaya \
     && chown -R appuser:appuser /app /app/data
 
 EXPOSE 8000

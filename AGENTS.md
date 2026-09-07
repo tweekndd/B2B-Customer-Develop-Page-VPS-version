@@ -229,3 +229,21 @@ Priority: A(≥80) > B(≥60) > C(≥40) > D
 | 对象存储（L3） | `app/services/object_storage.py`：`put_object/get_object/get_object_meta/delete_object/cleanup_expired_objects`；索引表 `storage_objects`；本地 Provider `DATA_DIR/objects`，内容寻址去重 |
 
 **运维提醒**：切换/升级 PostgreSQL schema 前先备份；生产建议 `DB_AUTO_CREATE=0` 并在 deploy 流程显式执行 `alembic upgrade head`（见方案 6.1 部署流程）。
+
+## Phase1（邮件外联基础）
+
+闭环：`客户详情页生成外联草稿 → 提交审批 → 邮件审核页人工确认 → Worker/Himalaya 发送 → 发送记录`。
+
+| 能力 | 入口 |
+|------|------|
+| Prompt 模板/版本/变量白名单 | `app/services/prompt_service.py` + `prompt_renderer.py`；表 `prompt_templates/prompt_versions`；白名单校验：模板引用未在 `variables_schema` 声明的 `{{var}}` 即拒绝（防注入） |
+| 生成溯源 | `generation_runs` 表：客户事实快照 + 渲染哈希 + 模型 + guard 结果 + 风险标记 |
+| AI 自由度 | 模板 `freedom_level` L0/L1/L2/L3（默认 L1）；种子模板启动幂等创建 |
+| 草稿审批 | `outreach_drafts`；状态机 draft→pending→approved→sending→sent / rejected / cancelled；审核页 `/outreach` |
+| 发件账户 | 设置页配置（Fernet 加密）→ `mail_sender_accounts`；连接测试走 stdlib smtplib |
+| 发送 | `app/services/himalaya_service.py`：himalaya v2 CLI，`-c <cfg> message send`（stdin=MIME）；未安装抛 `HimalayaUnavailableError` |
+| 幂等/限额/黑名单 | 发送任务 `idempotency_key=send:draft:{id}`；日志 `draft+收件人+主题哈希` 唯一；账户 `daily_limit`；`unsubscribe_blacklist` 邮箱+域名两级，审批与发送双检查 |
+| 发送日志 | `outreach_send_logs`：provider/internet Message-ID、状态、错误 |
+| Worker | `app/workers/runner.py`（独立进程 `python -m app.workers.runner`）+ `task_handlers.py`；`automation_tasks` 原子抢占/指数退避；`INAPP_WORKER=1` 时 Web 内建轻量 Worker 兜底 |
+
+**关键链路注意**：`approve → send` 两步（方案 9.2 人工确认边界）；`send` 会同步兜底执行任务并把客户状态联动为「已发邮件」并写 V5.2 `CustomerEmailActivity`（详情页发信记录可见）。真实发送前请确认：① 服务器 himalaya 已安装（Docker 内置；本机 `brew install himalaya`）；② 发件账户已保存并通过「测试连接」；③ 至少一个 active Prompt 模板已发布。

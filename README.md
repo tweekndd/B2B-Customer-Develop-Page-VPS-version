@@ -1,8 +1,8 @@
-﻿<div align="center">
+<div align="center">
 
 # AI Customer Development System
 
-**外贸客户 AI 分析系统** — 客户发现 + AI 分析 + 瀑布式邮箱 + 地理地图 + 权限管控
+**外贸客户 AI 分析系统** — 客户发现 + AI 分析 + 瀑布式邮箱 + **邮件外联（Himalaya 半自动闭环）** + 地理地图 + 权限管控
 
 一站式完成全球 B2B 销售线索挖掘。
 
@@ -20,6 +20,7 @@
 
 ## 📋 目录
 
+- [本次更新 v6.1（Phase1 邮件外联）](#-本次更新-v61phase1-邮件外联)
 - [功能概览](#-功能概览)
 - [快速开始](#-快速开始)
 - [使用教程](#-使用教程)
@@ -30,6 +31,94 @@
 - [评分系统](#-评分系统说明)
 - [技术栈](#-技术栈)
 - [测试](#-运行测试)
+
+---
+
+## 🆕 本次更新 v6.1（Phase1 邮件外联）
+
+> 按《AI 客户开发与邮件外联系统总体开发方案》Phase1「邮件外联基础」落地，形成半自动闭环：
+> **搜索客户 → AI 生成草稿（Prompt 模板）→ 人工审批 → Himalaya 发信 → 保存发送记录**，
+> 每封生成结果全程可溯源（哪个 Prompt、哪个版本、哪些客户事实、哪个模型、为何需人工审核）。
+
+### 一、发件账户（Himalaya SMTP）
+
+在 **「AI 与 API 设置」** 页新增 **发件账户（外联发送 · Himalaya）** 卡片：
+
+| 配置项 | 说明 |
+|---|---|
+| 发件邮箱 / 显示名 | 发送账户的 From 地址与姓名 |
+| SMTP 主机 / 端口 / 加密 | 支持 STARTTLS(587)、隐式 TLS(465)、无加密 |
+| SMTP 登录名 / 密码 | 密码 **Fernet 加密**入库（设置页只显示后 4 位），可 Gmail App Password / 任意 SMTP 凭据 |
+| IMAP 主机 / 端口 | 可选（Phase2 回复同步预留） |
+| 每日发送上限 | 账户级每日发信上限（默认 30，0=不限），防止触发送信平台风控 |
+| **测试连接** | 使用 Python smtplib/imaplib 即时验证 SMTP(+IMAP) 凭据与连通性，**不发真实邮件** |
+
+多个账户可并存；审批草稿时选择本次使用的发件账户。
+
+### 二、Prompt 管理（开发信模板 = 业务资产）
+
+新增 **「Prompt 管理」** 页面，开发信 Prompt 不再是硬编码代码字符串，而是可维护、可版本化、可回滚的业务资产：
+
+- **模板字段**：名称 / 用途（首封 / 跟进 / RFQ…）/ 语言 / 系统 Prompt（角色与边界）/ 用户模板（`{{变量}}`）/ 变量白名单 Schema / 模型配置 / 适用客户段
+- **变量白名单（防 Prompt 注入）**：模板只能引用 `customer.*`（公司名/国家/官网/AI 摘要/需求…）与 `system.*`（发件公司/签名/产品/CTA）等**已声明变量**；引用未声明变量即拒绝保存/渲染。客户官网等外部原文永远只能作为「客户事实输入」，不能携带指令
+- **版本管理**：发布生成不可变版本快照 → 历史版本只读 → 支持**回滚**（复制为草稿→发布新版本）与**基于版本复制**
+- **AI 自由度分级（方案 9.5）**：模板级 `freedom_level` —— L0 严格模板 / **L1 受控改写（生产默认）** / L2 个性化创作；启动自动创建「通用首封开发信（默认 L1）」种子模板
+- **变量说明弹窗** + **渲染预览**：插入变量即所见即所得
+
+### 三、AI 生成草稿（可溯源）
+
+客户详情页新增 **「外联审批草稿」** 区：选择 Prompt 模板（或默认 active）→ 生成，产出结构化输出（subject/body/language/tone/facts_used/claims_requiring_review/CTA/risk_flags）。
+
+每次生成写入 `generation_runs`：客户事实快照、渲染提示词哈希、模型/Provider、原始输出、**Guard 规则检查**（长度/高危承诺词/提示注入/退订合规）与风险标记 —— 完美回答"为什么生成成这样、为什么需要人工审核"。
+
+### 四、邮件审核（人工确认边界）
+
+新增 **「邮件审核」** 页面（侧边栏「邮件外联」分组），包含 5 个 Tab：
+
+| Tab | 功能 |
+|---|---|
+| **待审批** | 审批卡片流：查看正文/风险标记/溯源 → 批准并发送 / 拒绝（填原因）/ 仅保存修改 |
+| 全部草稿 | 按状态筛选（draft/pending/approved/sent/rejected/failed/cancelled） |
+| 发送记录 | 收件人/主题/状态/Message-ID/发送时间/错误 |
+| 任务中心 | Worker 任务队列（类型/状态/尝试次数/错误），可取消 |
+| 禁止联系名单 | **全局退订名单**维护：邮箱/域名两级，原因=退订/退信/投诉/人工 |
+
+草稿状态机：`draft → pending → approved → sending → sent`，或 `rejected`（修改后可重提）/ `cancelled`。
+
+### 五、发送安全三重保护
+
+1. **幂等键**：任务级 `send:draft:{id}` + 日志级收件人+主题哈希 —— 重复点击/Worker 重跑**永不重复发信**（成功任务直接返回已发送）；
+2. **每日发送上限**：审批与发送两时点校验，超限返回 429；
+3. **全局退订名单**：审批与发送两时点强制检查邮箱与主域名，命中即拦截。
+
+发送成功后自动：保存 `outreach_send_logs`（provider/internet Message-ID、状态）→ 草稿置为 sent → **客户状态联动「已发邮件」** + 回填最近发信时间 → 写入 V5.2 发信记录（详情页「发信记录」可见）。
+
+### 六、Worker 与任务队列
+
+- 新增 `automation_tasks` 表与 `app/workers/`：独立 Worker `python -m app.workers.runner`（docker-compose 已内置 `worker` 服务），支持**原子抢占**（并发安全）、指数退避、可重试（网络/限流/临时 SMTP）与不可重试（认证失败/黑名单）错误分类
+- **无独立 Worker 也能跑**：Web 进程默认内置轻量 Worker（`INAPP_WORKER=1`，compose 部署独立 worker 时自动关闭），审批后「发送」即时同步兜底执行
+
+### 七、数据库迁移
+
+新增 7 张表：`prompt_templates` / `prompt_versions` / `generation_runs` / `mail_sender_accounts` / `outreach_drafts` / `outreach_send_logs` / `unsubscribe_blacklist` + `automation_tasks`。生产升级：
+
+```bash
+alembic upgrade head    # 已部署 Phase0 的库
+# 开发/SQLite 单机：默认 DB_AUTO_CREATE=1 启动自动建表
+```
+
+### 八、如何开始使用
+
+```text
+1. 服务器安装 himalaya：Docker 镜像已内置（v2.1.0）；本机 brew install himalaya
+2. 「AI 与 API 设置」→ 发件账户：填 SMTP 凭据 →「测试连接」→ 保存
+3. 「Prompt 管理」→ 发布一个 active 模板（或用内置种子模板）
+4. 客户详情页 → 选模板 →「生成外联草稿并送审」
+5. 「邮件审核」→ 待审批 Tab → 检查正文/风险/溯源 → 选择发件账户 → 批准并发送
+6. 客户详情页「发信记录」查看结果；退订/投诉客户加入「禁止联系名单」
+```
+
+> ⚠️ 首次发信、正式报价等关键动作**默认必须人工审批**（方案 9.2 人工确认边界）——AI 只负责生成与分类，永远不自动发信。
 
 ---
 
@@ -58,6 +147,11 @@
 | **LinkedIn 公司页发现 V5.1** | 搜索引擎候选发现（`site:linkedin.com/company`，复用运行时切换引擎）→ 候选评分 → 人工确认，支持手动粘贴 URL |
 | **LinkedIn 官方 API V5.1** | OAuth 2.0 授权（设置页配置 Client ID / Secret）→ Organizations Lookup API（`?q=vanityName`）刷新组织详情：名称/Logo/地点/员工规模/官网 |
 | **自有邮箱发信检测 V5.2** | 授权 Gmail（只读 `gmail.readonly`，最小权限）→ 增量扫描已发送邮件 → 严格主域匹配客户（防反向包含）→ 详情页展示发信记录（主题/时间/收件人/发件邮箱），支持 Pub/Sub 推送 + 轮询补偿双模式 |
+| **外联发件账户 V6.1（Phase1）** | 设置页配置 Himalaya SMTP 发件账户（主机/端口/加密/登录名/密码 Fernet 加密存储，支持测试连接不发信）+ 可选 IMAP（Phase2 回复同步预留）+ 账户每日发送上限 |
+| **Prompt 模板管理 V6.1（Phase1）** | 可编辑/复制/发布/回滚的开发信 Prompt 业务资产：系统 Prompt + 用户模板 + **变量白名单**（未声明变量拒绝渲染，防注入）+ 不可变版本快照 + L0/L1/L2 AI 自由度（生产默认 L1）+ 内置默认模板 |
+| **生成溯源 V6.1（Phase1）** | 每次开发信生成保存客户事实快照/渲染哈希/模型/Guard 检查/风险标记 → 可回答「用了哪个 Prompt、哪个版本、哪些事实、哪个模型、为何需人工审核」 |
+| **邮件审核 V6.1（Phase1）** | 外联草稿审批闭环：详情页生成 → 提交人工审批 → 审核页确认（绑定发件账户）→ Worker/Himalaya 发送 → 发送记录；含全局禁止联系名单（退订/退信/投诉）与草稿幂等键防重复发送 |
+| **自动化任务 V6.1（Phase1）** | `automation_tasks` 任务表 + 独立 Worker（`python -m app.workers.runner`，原子抢占 + 指数退避 + 可重试/不可重试错误分类）；Web 进程可用 `INAPP_WORKER=1` 兜底（无独立 Worker 环境也能发送） |
 | **主表大字段瘦身 V5.3** | `website_text` / `ai_raw_json` 停止写入主表，由快照表承接并展示历史版本；sync 导出 standard 模式排除大字段 + 快照表同步；组合索引 + 周期缓存清理 |
 | **相似客户扩展** | 输入公司网址 + 目标国家，自动搜索相似客户，支持多语言本地化搜索 |
 | **客户地理分布地图** | Leaflet.js 地图可视化：城市级定位 + MarkerCluster 聚合 + 暗色/亮色主题自适应 |
@@ -220,6 +314,9 @@ cp .env.example .env
 | `GMAIL_PUBSUB_TOPIC` | — | 可选：Gmail watch Pub/Sub topic（未配置时自动退化为轮询同步） |
 | `GMAIL_PUBSUB_TOKEN` | — | 可选：Pub/Sub push Bearer 令牌校验 |
 | `MAIL_MAINTENANCE_INTERVAL` | `21600` | 发信检测后台维护间隔秒（watch 续期 + 补偿同步） |
+| `INAPP_WORKER` | `1` | Phase1：Web 进程内置轻量 Worker 消费自动化任务（无独立 worker 进程的兜底；docker-compose 部署独立 `worker` 服务时自动设为 0） |
+| `WORKER_POLL_SECONDS` | `3` | 独立/内置 Worker 轮询间隔秒 |
+| `HIMALAYA_BIN` | 自动探测 | himalaya 可执行文件路径（Docker 镜像已内置，本机 brew install himalaya 后自动发现） |
 | `READER_BASE_URL` | `https://r.jina.ai` | Jina AI Reader API 地址 |
 | `FIRECRAWL_API_KEY` | — | （可选旧版兜底） |
 | `EMAIL_DISCOVERY_MIN_RESULTS` | `2` | 瀑布流结果低于此值触发下一级 |
@@ -454,6 +551,7 @@ bash deploy.sh
 |------|--------|------|------|
 | Nginx 反代 | `b2b-nginx` | `80 / 443`（对外） | 唯一公网入口 |
 | FastAPI 应用 | `b2b-app` | `127.0.0.1:8000`（仅本机/内网） | 公网不可直连 |
+| **Worker（Phase1）** | `b2b-worker` | 无（内网） | 消费自动化任务（邮件外联发送等），与 app 共享数据库与 himalaya 配置卷 |
 | SearXNG 引擎 | `searxng` | `8888`（内网） | 不对外暴露 |
 | PostgreSQL | `b2b-db` | `5432`（可选） | 默认 SQLite |
 
@@ -617,7 +715,7 @@ AI-Trade-Customer-Analyzer/
 │   ├── static/js/                    # JS 模块（含 settings.js 设置页）
 │   ├── templates/                    # HTML 模板（含 settings.html / filemanager.html）
 │   └── filemanager.py                # VPS 文件管理器（仅管理员）
-└── tests/                            # 406 个测试用例
+└── tests/                            # 447 个测试用例
 ```
 
 ---
@@ -646,6 +744,14 @@ AI-Trade-Customer-Analyzer/
 | `website_snapshots` | 官网抓取快照（V5.3：内容哈希去重，历史可追溯） |
 | `analysis_runs` | AI 分析运行记录（V5.3：失败也记录，不覆盖历史成功） |
 | `score_snapshots` | 评分快照（V5.3：规则变更后可追溯，关联分析运行） |
+| `prompt_templates` | Prompt 模板（V6.1 Phase1：名称/用途/语言/系统+用户模板/变量白名单/自由度/状态） |
+| `prompt_versions` | Prompt 版本不可变快照（V6.1：发布生成、可回滚/复制，历史只读） |
+| `generation_runs` | AI 生成运行记录（V6.1：客户事实快照/渲染哈希/模型/Guard/风险标记） |
+| `mail_sender_accounts` | 外联发件账户（V6.1：SMTP/IMAP 凭据 Fernet 加密 + 每日上限 + 测试状态） |
+| `outreach_drafts` | 外联草稿与审批（V6.1：draft/pending/approved/sent/rejected 状态机 + 溯源） |
+| `outreach_send_logs` | 发送日志（V6.1：幂等键唯一 + provider/internet Message-ID + 状态） |
+| `unsubscribe_blacklist` | 全局退订/禁止联系名单（V6.1：邮箱+域名两级） |
+| `automation_tasks` | 自动化任务队列（V6.1：原子抢占/指数退避/重试分类） |
 
 > **用户级 API Key**：`user_api_config` 表按「用户 + 服务」唯一存储各用户自己的 Key，加密密钥来自 `API_CONFIG_ENCRYPTION_KEY` 环境变量（未设置时自动生成并持久化到 `app/.config_encryption_key`，该文件已被 gitignore）。
 
@@ -680,11 +786,12 @@ AI-Trade-Customer-Analyzer/
 | **前端** | JavaScript (ES Modules) · Bootstrap 5 · Leaflet.js |
 | **AI** | 智谱 GLM (`glm-4.7-flash`，免费，支持自动降级) |
 | **搜索** | SearXNG（免费自托管）/ Tavily / SerpAPI（运行时切换） |
-| **邮箱** | Hunter.io + Tomba.io + Prospeo.io + 官网抓取（四级瀑布） |
+| **邮箱发现** | Hunter.io + Tomba.io + Prospeo.io + 官网抓取（四级瀑布） |
+| **邮件外联（Phase1）** | Himalaya CLI (v2.x) 收发 · SMTP/IMAP 凭据 Fernet 加密 · Prompt 模板/版本/变量白名单 · 草稿审批状态机 · 幂等/每日上限/退订名单 · 独立 Worker（`app/workers/`） |
 | **爬虫** | httpx + BeautifulSoup（异步并发）· Jina AI Reader 免费降级 |
 | **地图** | Leaflet.js + MarkerCluster + Nominatim |
 | **部署** | Docker · Docker Compose · Nginx · Let's Encrypt |
-| **测试** | pytest（406 测试用例：纯逻辑单元 + API 集成） |
+| **测试** | pytest（447 测试用例：纯逻辑单元 + API 集成） |
 | **缓存** | 本地 SQLite 多级缓存（搜索 / 官网 / AI 分析 / 邮箱 / 地理编码） |
 | **认证** | Session + bcrypt · 多用户 · 逐用户配额管控 |
 
@@ -694,7 +801,7 @@ AI-Trade-Customer-Analyzer/
 
 ```bash
 source venv/bin/activate
-pytest tests/ -v     # 406 测试，详细输出
+pytest tests/ -v     # 447 测试，详细输出
 pytest tests/ -q     # 简洁输出
 ```
 
