@@ -20,6 +20,7 @@ from .intelligence import WebsiteSnapshot, AnalysisRun, ScoreSnapshot  # noqa: F
 from .outreach import MailAccount, CustomerEmailActivity  # noqa: F401
 from .identity import User, UserApiConfig, LinkedInOAuthToken  # noqa: F401
 from .cache import GeocodeCache  # noqa: F401
+from .storage import StorageObject  # noqa: F401
 
 
 def init_db():

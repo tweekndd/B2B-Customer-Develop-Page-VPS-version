@@ -121,7 +121,23 @@ def get_map_data(
         query = query.filter(Customer.country == country)
 
     total_filtered = query.count()
-    customers = query.offset(offset).limit(limit).all()
+    # Phase0：地图数据只需少量列，不加载 website_text/ai_raw_json 等大字段
+    customers = (
+        query.with_entities(
+            Customer.id,
+            Customer.company_name,
+            Customer.country,
+            Customer.city,
+            Customer.latitude,
+            Customer.longitude,
+            Customer.total_score,
+            Customer.status,
+            Customer.priority,
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     results = []
     countries_set = set()

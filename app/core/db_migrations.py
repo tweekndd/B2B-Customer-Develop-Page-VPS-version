@@ -137,7 +137,19 @@ def init_db():
     """初始化数据库：创建所有表 + 自动迁移新增列（V2.2 支持）
 
     注意：调用前必须已导入 app.models（确保 Base.metadata 注册全部表）。
+
+    Phase0：生产环境建议由 Alembic 管理 schema。设置环境变量
+    `DB_AUTO_CREATE=0` 后，本函数仅做连通性确认，不自动建表/改表，
+    全部结构变更通过 `alembic upgrade head` 执行（见 alembic/versions）。
+    默认（未设置或为 1）保留自动迁移，作为 SQLite 开发/单机兼容路径。
     """
+    import os
+    import sqlalchemy as sa
+    if os.environ.get("DB_AUTO_CREATE", "1").strip() == "0":
+        with engine.connect() as conn:
+            conn.execute(sa.text("SELECT 1"))
+        return
+
     Base.metadata.create_all(bind=engine)
     _ensure_indexes(engine)
 

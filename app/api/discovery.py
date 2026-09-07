@@ -12,6 +12,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.database import get_db, Customer, SearchTask, SessionLocal
 from app.services.search_task_service import run_search_task, request_task_stop, get_paused_tasks, resume_paused_task
@@ -337,7 +338,23 @@ def list_discovered_customers(
 
     total_count = query.count()
     offset_val = (page - 1) * page_size
-    customers = query.offset(offset_val).limit(page_size).all()
+    # Phase0：列表只加载所需列，避免加载 website_text / ai_raw_json / emails JSON 等大字段
+    customers = (
+        query.with_entities(
+            Customer.id,
+            Customer.company_name,
+            Customer.website,
+            Customer.country,
+            Customer.total_score,
+            Customer.priority,
+            Customer.discovery_keyword,
+            Customer.ai_summary,
+            Customer.created_at,
+        )
+        .offset(offset_val)
+        .limit(page_size)
+        .all()
+    )
 
     all_countries = db.query(Customer.country).distinct().filter(
         Customer.country.isnot(None), Customer.country != "",
@@ -351,24 +368,27 @@ def list_discovered_customers(
     ).all()
     keyword_list = list(set(k[0] for k in all_keywords if k[0]))
 
-    # 复用 customers 模块的邮箱解析
-    def _get_emails(customer):
-        if not customer.emails:
-            return []
-        try:
-            return json.loads(customer.emails)
-        except (json.JSONDecodeError, TypeError):
-            return [e.strip() for e in customer.emails.split(",") if e.strip()]
+    # Phase0：邮箱数量从 customer_emails 表一次聚合（避免逐行解析大字段 JSON）
+    page_ids = [c.id for c in customers]
+    email_counts: dict = {}
+    if page_ids:
+        from app.database import CustomerEmail
+        rows = (
+            db.query(CustomerEmail.customer_id, func.count(CustomerEmail.id))
+            .filter(CustomerEmail.customer_id.in_(page_ids))
+            .group_by(CustomerEmail.customer_id)
+            .all()
+        )
+        email_counts = dict(rows)
 
     result = []
     for c in customers:
-        emails = _get_emails(c)
         result.append({
             "id": c.id,
             "company_name": c.company_name,
             "website": c.website or "",
             "country": c.country or "",
-            "email_count": len(emails),
+            "email_count": email_counts.get(c.id, 0),
             "total_score": c.total_score,
             "priority": c.priority or "-",
             "discovery_keyword": c.discovery_keyword or "",

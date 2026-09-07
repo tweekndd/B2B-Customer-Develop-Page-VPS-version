@@ -27,10 +27,27 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models so Alembic can detect them
-from app.database import (
-    Customer, User, SearchTask, SearchCache, WebsiteCache,
-    AnalysisCache, HunterCache, TombaCache, ProspeoCache,
-    EmailQuotaLog, GeocodeCache, UserApiConfig,
+from app.models import (  # noqa: F401
+    Customer,
+    CustomerEmail,
+    CustomerSocialProfile,
+    WebsiteSnapshot,
+    AnalysisRun,
+    ScoreSnapshot,
+    SearchTask,
+    SearchCache,
+    WebsiteCache,
+    HunterCache,
+    TombaCache,
+    EmailQuotaLog,
+    AnalysisCache,
+    GeocodeCache,
+    ProspeoCache,
+    User,
+    UserApiConfig,
+    LinkedInOAuthToken,
+    MailAccount,
+    CustomerEmailActivity,
 )
 
 target_metadata = Base.metadata
@@ -44,6 +61,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
+        render_as_batch=True,
     )
 
     with context.begin_transaction():
@@ -62,6 +81,8 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            compare_type=True,
+            render_as_batch=True,
         )
 
         with context.begin_transaction():

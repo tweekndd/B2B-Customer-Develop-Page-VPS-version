@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.database import init_db, get_db
+from app.core.database import check_database, DATABASE_URL
 from app.services.cache_manager import clean_expired_cache
 from app.auth import get_user_from_session, get_current_user, require_admin, ensure_admin_exists
 from app.api import router
@@ -258,6 +259,22 @@ def _login_required_page(request: Request, template: str, **kwargs):
 
 
 # ── 公开页面（无需登录）──
+
+@app.get("/healthz")
+async def healthz():
+    """存活探针：返回进程与数据库健康状态（供 Nginx/Docker healthcheck）"""
+    import platform
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "app": "b2b-customer-analyzer",
+            "python": platform.python_version(),
+            "database": check_database(),
+            "database_url": "postgresql" if DATABASE_URL.startswith("postgresql") else "sqlite",
+        },
+        status_code=200,
+    )
+
 
 @app.get("/login")
 async def login_page(request: Request):

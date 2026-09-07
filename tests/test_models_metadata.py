@@ -95,6 +95,8 @@ EXPECTED_TABLES = {
     "website_snapshots",
     "analysis_runs",
     "score_snapshots",
+    # Phase0：对象存储索引
+    "storage_objects",
 }
 
 
@@ -131,7 +133,7 @@ class TestModelRegistry:
                      "EmailQuotaLog", "AnalysisCache", "GeocodeCache", "ProspeoCache",
                      "User", "UserApiConfig", "LinkedInOAuthToken", "MailAccount",
                      "CustomerEmailActivity", "WebsiteSnapshot", "AnalysisRun",
-                     "ScoreSnapshot", "init_db", "get_db", "Base", "SessionLocal"):
+                     "ScoreSnapshot", "StorageObject", "init_db", "get_db", "Base", "SessionLocal"):
             assert hasattr(db, name), f"app.database 缺少导出: {name}"
 
 

@@ -88,7 +88,7 @@ deploy() {
     # 等待就绪
     info "等待服务启动..."
     for i in $(seq 1 30); do
-        if curl -sf http://127.0.0.1:8000/login > /dev/null 2>&1; then
+        if curl -sf http://127.0.0.1:8000/healthz > /dev/null 2>&1; then
             ok "服务已就绪！"
             break
         fi
@@ -154,6 +154,7 @@ update() {
 
     echo ""
     ok "更新完成！"
+    echo "  提示：如本次更新包含数据库结构变更，请执行：bash deploy.sh db-migrate"
     docker compose ps
 }
 
@@ -191,36 +192,30 @@ logs() {
 
 # ─── 数据库备份 ───────────────────────────────────────────────────────────────
 db_backup() {
-    local backup_dir="${BACKUP_DIR:-./backups}"
-    local timestamp
-    timestamp=$(date +%Y%m%d_%H%M%S)
+    bash scripts/backup.sh
+}
 
-    mkdir -p "$backup_dir"
-
-    # 检查是否使用 PostgreSQL
-    if grep -q 'DATABASE_URL' .env 2>/dev/null && grep -q 'postgresql' .env 2>/dev/null; then
-        info "正在备份 PostgreSQL 数据库..."
-        if docker ps --format '{{.Names}}' | grep -q '^b2b-db$'; then
-            docker exec b2b-db pg_dump -U "${DB_USER:-b2b}" "${DB_NAME:-b2b_customers}" > "${backup_dir}/postgres_${timestamp}.sql"
-            ok "PostgreSQL 备份完成: ${backup_dir}/postgres_${timestamp}.sql"
-        else
-            warn "PostgreSQL 容器未运行，跳过备份"
-        fi
-    else
-        info "正在备份 SQLite 数据库..."
-
-        # 复制 SQLite 数据库文件（从 Docker 卷复制到宿主机）
-        if docker ps --format '{{.Names}}' | grep -q '^b2b-app$'; then
-            docker cp b2b-app:/app/app/customers.db "${backup_dir}/customers_${timestamp}.db"
-            ok "备份完成: ${backup_dir}/customers_${timestamp}.db"
-        else
-            warn "应用容器未运行，跳过备份"
-        fi
+# ─── 数据库恢复 ───────────────────────────────────────────────────────────────
+db_restore() {
+    # 用法: bash deploy.sh db-restore [备份文件]
+    if [ ! -f scripts/restore.sh ]; then
+        err "scripts/restore.sh 不存在，请先更新代码"
+        exit 1
     fi
+    bash scripts/restore.sh "${2:-}"
+}
 
-    # 保留最近 30 天备份，删除旧备份
-    find "$backup_dir" -name 'customers_*.db' -mtime +30 -delete 2>/dev/null || true
-    find "$backup_dir" -name 'postgres_*.sql' -mtime +30 -delete 2>/dev/null || true
+# ─── 版本化迁移（Alembic）─────────────────────────────────────────────────────
+db_migrate() {
+    info "执行版本化数据库迁移 (alembic upgrade head)..."
+    docker compose run --rm app python -m alembic upgrade head
+    ok "数据库迁移完成"
+}
+
+# ─── 数据库状态检查 ───────────────────────────────────────────────────────────
+db_status() {
+    docker compose ps db 2>/dev/null
+    curl -sf http://127.0.0.1:8000/healthz && echo "" && ok "数据库健康检查通过"
 }
 
 # ─── 主入口 ───────────────────────────────────────────────────────────────────
@@ -240,6 +235,15 @@ case "${1:-deploy}" in
     db-backup|backup)
         db_backup
         ;;
+    db-restore|restore)
+        db_restore "$@"
+        ;;
+    db-migrate|migrate)
+        db_migrate
+        ;;
+    db-status)
+        db_status
+        ;;
     *)
         echo "用法: bash deploy.sh [命令]"
         echo ""
@@ -248,7 +252,10 @@ case "${1:-deploy}" in
         echo "  update        更新代码后重新构建（自动备份数据库）"
         echo "  rollback      回滚到上一个版本"
         echo "  logs [服务]   查看日志（默认 app）"
-        echo "  db-backup     备份数据库（SQLite 或 PostgreSQL）"
+        echo "  db-backup     备份数据库（SQLite 或 PostgreSQL，含保留策略）"
+        echo "  db-restore    从备份恢复数据库（指定文件或最新）"
+        echo "  db-migrate    执行 Alembic 版本化数据库迁移"
+        echo "  db-status     查看数据库与健康状态"
         echo ""
         ;;
 esac

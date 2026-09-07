@@ -27,12 +27,12 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # 复制应用代码
 COPY . .
 
-# 创建运行时目录
-RUN mkdir -p app/uploads app/static/css app/templates \
-    && chown -R appuser:appuser /app
-
-# 创建非 root 用户
+# 创建非 root 用户（须先于 chown）
 RUN useradd -r -s /bin/false -d /app appuser
+
+# 创建运行时目录并授权（含 Phase0 对象存储数据目录 /app/data）
+RUN mkdir -p app/uploads app/static/css app/templates /app/data \
+    && chown -R appuser:appuser /app /app/data
 
 EXPOSE 8000
 

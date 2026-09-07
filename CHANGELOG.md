@@ -1,5 +1,23 @@
 # 更新日志
 
+## v6.0 Phase0（2026-09-07）
+
+### 🛡️ 生产基础加固（方案 Phase0）
+
+按《AI 客户开发与邮件外联系统总体开发方案》Phase0「让现有系统适合成为长期数据中心」执行：
+
+- **PostgreSQL 生产库就绪**：启用 `psycopg2-binary`；`app/core/database.py` 支持连接池（`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`/`DB_POOL_RECYCLE`/`DB_POOL_TIMEOUT`，`pool_pre_ping`）；`DATABASE_URL` 指向 postgresql 即切换，SQLite 保留为开发/单机默认
+- **健康检查**：`app/core/database.py:check_database()` 执行 `SELECT 1`；新增公开端点 `GET /healthz`（进程 + 数据库状态）；docker-compose app healthcheck 与 deploy.sh 就绪探测改用 `/healthz`
+- **版本化迁移（Alembic）**：`alembic/env.py` 导入全量模型；重建 `alembic/versions/001_initial_schema.py` 为与当前全部模型一致的完整基线（含 V5.1-V5.3 新表 + storage_objects），`alembic upgrade head` 在全新库上即得与 `create_all` 一致 schema，`alembic check` 零漂移；`DB_AUTO_CREATE=0` 时启动不再自动建表/改表，schema 全权交由 Alembic
+- **每日备份与恢复**：新增 `scripts/backup.sh`（PostgreSQL `pg_dump` 逻辑备份 / SQLite 安全复制；每日 30 天 / 每周 12 周 / 每月 12 个月保留策略；可选 gpg AES256 加密）+ `scripts/restore.sh`（恢复前自动备份当前库）；deploy.sh 新增 `db-backup`/`db-restore`/`db-migrate`/`db-status` 子命令
+- **慢查询检查**：`SLOW_QUERY_MS` 阈值（默认 0 关闭），超过时记录到 `logs/slow_query.log`（5MB 轮转）
+- **列表接口大字段隔离**：`/discovery/discovered-customers`、`/customers/map` 改用 `with_entities` 仅加载所需列，email_count 改由 `customer_emails` 聚合（不再逐行解析大字段 JSON）
+- **对象存储抽象（数据分层 L3）**：新增 `app/models/storage.py` `storage_objects` 索引表（object_key/content_hash/content_type/size_bytes/storage_provider/retention_until）+ `app/services/object_storage.py`（本地文件 Provider `DATA_DIR/objects`，内容寻址去重；`put/get/get_meta/delete/exists/cleanup_expired/disk_usage`），Provider 可扩展 S3
+
+**验证**：`pytest tests/` 相关用例通过（新增 `tests/test_object_storage.py` 6 项；`EXPECTED_TABLES` 补入 `storage_objects`）。首次在已有库启用迁移：`alembic stamp head`；全新库：`alembic upgrade head`。
+
+---
+
 ## v5.3（2026-08-14）
 
 ### 🎯 阶段3：Customer 主表大字段彻底瘦身

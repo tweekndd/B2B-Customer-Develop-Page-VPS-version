@@ -84,9 +84,14 @@ services:
       retries: 3
       start_period: 30s
 
-  # ─── PostgreSQL 数据库（可选） ──────────────────────────────────────
-  # 如不使用 PostgreSQL，请注释本服务，并确保 .env 中未设置 DATABASE_URL
-  # 默认使用 SQLite（无需额外配置）
+  # ─── PostgreSQL 数据库（生产推荐，可选） ───────────────────────────
+  # 使用方式:
+  #   1. .env 中设置 COMPOSE_PROFILES=with-db 或启动时加 --profile with-db
+  #   2. .env 中设置 DATABASE_URL=postgresql://b2b:密码@db:5432/b2b_customers
+  #   3. 首次/升级 schema 执行版本化迁移（而非启动时自动改表）:
+  #        docker compose run --rm app alembic upgrade head
+  #      （存量 DB 为 create_all 建库时，先执行 alembic stamp head 再 upgrade）
+  #   4. 生产建议 .env 设置 DB_AUTO_CREATE=0（禁启动自动建表，schema 完全交给 Alembic）
   db:
     image: postgres:15-alpine
     container_name: b2b-db
@@ -128,6 +133,8 @@ services:
     volumes:
       # SQLite 数据库持久化（如使用 PostgreSQL 可删除此卷）
       - sqlite-data:/app/app
+      # Phase0 对象存储数据目录（官网快照/附件/导出等大对象，须持久化；同属卷便于权限/备份）
+      - data-volume:/app/data
     restart: unless-stopped
     deploy:
       resources:
@@ -141,7 +148,7 @@ services:
         max-file: "5"
     # 健康检查
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -152,3 +159,4 @@ volumes:
   searxng-data:
   postgres-data:
   sqlite-data:
+  data-volume:

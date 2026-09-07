@@ -39,6 +39,7 @@ from app.models import (  # noqa: F401
     LinkedInOAuthToken,
     MailAccount,
     CustomerEmailActivity,
+    StorageObject,
     init_db,
 )
 

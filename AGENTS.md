@@ -77,13 +77,15 @@ Key service responsibilities and data flow:
 ## Database
 
 **Default**: SQLite at `app/customers.db`  
-**Override**: `DATABASE_URL` env var (PostgreSQL supported)
+**Override**: `DATABASE_URL` env var → PostgreSQL（生产推荐，`app/core/database.py` 连接池 `DB_POOL_*` 可配）
 
-**11 tables**: Customer, User, SearchTask, SearchCache, WebsiteCache, AnalysisCache, HunterCache, TombaCache, ProspeoCache, EmailQuotaLog, GeocodeCache
+**20 tables**: Customer, User, SearchTask, SearchCache, WebsiteCache, AnalysisCache, HunterCache, TombaCache, ProspeoCache, EmailQuotaLog, GeocodeCache, CustomerEmail, CustomerSocialProfile, WebsiteSnapshot, AnalysisRun, ScoreSnapshot, MailAccount, CustomerEmailActivity, LinkedInOAuthToken, UserApiConfig, StorageObject
 
-**Note**: `app/database.py` actually defines 11 models — the above plus `User`, `GeocodeCache`. Auto-migration: `init_db()` in `database.py:283` creates tables + adds missing columns via `ALTER TABLE ADD COLUMN`. Indexes are created with `CREATE INDEX IF NOT EXISTS`. No Alembic or migration tooling.
+**Note**: `app/database.py` 兼容层聚合 `app/models/*`。历史自动迁移 `init_db()`（create_all + `ALTER TABLE ADD COLUMN`）作为 SQLite 开发/单机兼容路径保留；**Phase0 起生产 schema 由 Alembic 管理**（`alembic/versions/001_initial_schema.py` 完整基线，`alembic upgrade head` 即可；存量 create_all 库先 `alembic stamp head`）。设置 `DB_AUTO_CREATE=0` 后启动不再自动建表/改表。
 
 **Key Customer fields**: `scrape_status` / `ai_status` / `fail_reason` track processing state. `emails` is a JSON string, not a relation. Scores are individual columns (`industry_score`..`total_score`).
+
+**List queries**（`/api/customers`、`/discovery/discovered-customers`、`/customers/map`）用 `with_entities` 只加载必要列，不加载 `website_text`/`ai_raw_json` 大字段；email_count 从 `customer_emails` 聚合。
 
 ## Configuration
 
@@ -213,3 +215,17 @@ Priority: A(≥80) > B(≥60) > C(≥40) > D
 - `sync.sh` supports `export|import|status` for multi-device data sharing
 - Works via REST API endpoints (`/api/sync/export`, `/api/sync/import`)
 - Designed for iCloud/Dropbox/USB workflows
+
+## Phase0（生产基础加固）
+
+| 能力 | 入口 |
+|------|------|
+| 数据库健康检查 | `GET /healthz`；`app.core.database.check_database()` |
+| 版本化迁移 | `alembic upgrade head`；基线 `alembic/versions/001_initial_schema.py`；`DB_AUTO_CREATE=0` 关闭启动自动建表 |
+| 每日备份 | `bash scripts/backup.sh`（Postgres pg_dump / SQLite；日/周/月保留；`BACKUP_ENCRYPT_KEY` gpg 加密） |
+| 恢复 | `bash scripts/restore.sh [文件]`（恢复前自动备份当前库） |
+| deploy.sh 运维 | `db-backup` / `db-restore` / `db-migrate` / `db-status` |
+| 慢查询日志 | `SLOW_QUERY_MS`（ms）→ `logs/slow_query.log` |
+| 对象存储（L3） | `app/services/object_storage.py`：`put_object/get_object/get_object_meta/delete_object/cleanup_expired_objects`；索引表 `storage_objects`；本地 Provider `DATA_DIR/objects`，内容寻址去重 |
+
+**运维提醒**：切换/升级 PostgreSQL schema 前先备份；生产建议 `DB_AUTO_CREATE=0` 并在 deploy 流程显式执行 `alembic upgrade head`（见方案 6.1 部署流程）。
