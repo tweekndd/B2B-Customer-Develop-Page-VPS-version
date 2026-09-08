@@ -2,7 +2,7 @@
 
 # AI Customer Development System
 
-**外贸客户 AI 分析系统** — 客户发现 + AI 分析 + 瀑布式邮箱 + **邮件外联（Himalaya 半自动闭环）** + 地理地图 + 权限管控
+**外贸客户 AI 分析系统** — 客户发现 + AI 分析 + 瀑布式邮箱 + **邮件外联（Himalaya 半自动闭环）** + **回复同步与 AI 分类（回复中心）** + 地理地图 + 权限管控
 
 一站式完成全球 B2B 销售线索挖掘。
 
@@ -20,6 +20,7 @@
 
 ## 📋 目录
 
+- [本次更新 v6.2（Phase2 回复同步与 AI 分类）](#-本次更新-v62phase2-回复同步与-ai-分类)
 - [本次更新 v6.1（Phase1 邮件外联）](#-本次更新-v61phase1-邮件外联)
 - [功能概览](#-功能概览)
 - [快速开始](#-快速开始)
@@ -31,6 +32,58 @@
 - [评分系统](#-评分系统说明)
 - [技术栈](#-技术栈)
 - [测试](#-运行测试)
+
+---
+
+## 🆕 本次更新 v6.2（Phase2 回复同步与 AI 分类）
+
+> 按《AI 客户开发与邮件外联系统总体开发方案》Phase2「回复同步与 AI 分类」落地，把「发出去的信」变成可闭环的销售动作：
+> **新回复 → 去重 → 匹配客户 → AI 分类 → 创建待办 / 进黑名单**，收发同箱（IMAP 复用 Phase1 发件账户凭据）。
+
+### 一、收件同步（增量拉取）
+
+- `app/services/inbox_sync_service.py` 用 imaplib 增量拉取 INBOX，游标（UIDVALIDITY + 最大 UID）存在 `mail_sender_accounts`；UIDVALIDITY 变化自动放弃游标全量重吸
+- 正文 / 原始 MIME / 附件统一外置到对象存储（`storage_objects`），主表只存描述与 object_key
+- 去重：`(provider, mail_account_id, provider_message_id)` 唯一，Message-ID 缺失回退 `uid-{uid}`
+- 单账户 fail-open：某账户连接失败写 `last_error`，其它账户照常同步
+
+### 二、AI 回复意图分类
+
+- `app/services/reply_classifier.py`：**规则预判**退信（送达失败头 / `multipart/report`）→ **LLM 结构化 JSON** 分类（走统一 `get_llm_manager`，输出白名单 `_sanitize` 归一；非法输出自动回退规则兜底，绝不阻断）→ **规则兜底**
+- 意图：`rfq`（询价）/ `interest`（意向）/ `question`（提问）/ `not_interested`（婉拒）/ `unsubscribe`（退订）/ `out_of_office`（自动回复）/ `bounce`（退信）/ `complaint`（投诉）/ `other`
+- **退信 / 退订自动进全局黑名单**（即使未匹配客户也生效）——退信取 `x-failed-recipients` / 发件人，退订取发件人
+
+### 三、客户状态机 + 动作待办
+
+- `app/services/customer_status.py`：`transition_customer_status()` —— 人工 = 任意跳转；自动（发送 / 回复 / 退信 / 退订）= 严格**只升不降**；「无效线索」为终态（自动永不进入，`revive_customer()` 强制回待联系）；全程写 `customer_status_history` 审计
+- 回复意图（rfq/interest/question/complaint）且匹配到客户 → 生成 `customer_todos` 动作待办（todo_type = 询价/跟进/需回复/投诉；priority 1=高/2=中/3=低），客户状态联动「已发邮件 → 已回复」
+- **任务重跑与事件流水**：`rerun_task`（仅失败/取消可人工重跑）+ `automation_task_events` 事件中心
+
+### 四、回复中心 UI
+
+侧边栏新增 **「回复中心」**（`GET /inbox`）：
+
+| 区域 | 功能 |
+|---|---|
+| 统计行 | 全部回复 / 未处理 / 询价 / 进行中待办 / 退信退订 / 已匹配客户 |
+| **回复邮件** Tab | 新回复列表（默认未处理优先），点开详情弹窗看正文（按需读取）+ 附件下载 + 标记已处理/忽略 |
+| **动作待办** Tab | 待办卡片流转（done / reopen / dismiss）|
+| 手动同步 | 一键触发收件箱增量同步 |
+
+### 五、周期同步
+
+`main.py` lifespan 启停 `periodic_inbox_sync()`，默认每 `INBOX_SYNC_INTERVAL=1800` 秒自动拉取一次新回复（可在 `.env` 调整）。
+
+> ⚠️ 真实同步需：发件账户已配置 **IMAP** 并保存凭据（设置页「发件账户」→「测试连接」）；分类 LLM 走统一架构（用户 Key 优先，服务器环境变量回退）。
+
+### 六、数据库迁移
+
+新增 5 张表：`mail_messages` / `mail_attachments` / `customer_todos` / `customer_status_history` / `automation_task_events` + `mail_sender_accounts` 3 个同步游标列。生产升级：
+
+```bash
+alembic upgrade head    # 已部署 Phase0/Phase1 的库
+# 开发/SQLite 单机：默认 DB_AUTO_CREATE=1 启动自动建表
+```
 
 ---
 

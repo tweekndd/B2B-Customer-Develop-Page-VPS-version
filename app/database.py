@@ -49,6 +49,12 @@ from app.models import (  # noqa: F401
     OutreachSendLog,
     UnsubscribeBlacklist,
     AutomationTask,
+    # Phase2（回复同步与 AI 分类）新增
+    MailMessage,
+    MailAttachment,
+    CustomerStatusHistory,
+    CustomerTodo,
+    AutomationTaskEvent,
     init_db,
 )
 

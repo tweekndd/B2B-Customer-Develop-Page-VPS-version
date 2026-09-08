@@ -67,6 +67,11 @@
                     <span>Prompt 管理</span>
                 </a>
 
+                <a class="sidebar-link{% if active_nav == 'inbox' %} active{% endif %}" href="/inbox" onclick="navigate(event, '/inbox')">
+                    <i class="bi bi-inbox-fill"></i>
+                    <span>回复中心</span>
+                </a>
+
                 <div class="sidebar-section-label">工具</div>
 
                 <a class="sidebar-link{% if active_nav == 'hunter' %} active{% endif %}" href="/hunter" onclick="navigate(event, '/hunter')">

@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.database import AutomationTask
+from app.database import AutomationTask, AutomationTaskEvent
 from app.models.automation import (
     TASK_QUEUED, TASK_RUNNING, TASK_RETRY_WAIT, TASK_SUCCEEDED,
     TASK_FAILED, TASK_CANCELLED, TASK_SEND_EMAIL,
@@ -136,6 +136,79 @@ def get_task(db: Session, task_id: int) -> AutomationTask:
     return t
 
 
+def record_task_event(
+    db: Session,
+    task: AutomationTask,
+    event_type: str,
+    message: Optional[str] = None,
+    payload: Optional[Dict[str, Any]] = None,
+) -> AutomationTaskEvent:
+    """记录任务事件流水（Phase2：automation_task_events）。"""
+    ev = AutomationTaskEvent(
+        task_id=task.id,
+        event_type=event_type,
+        event_message=message,
+        payload_json=json.dumps(payload, ensure_ascii=False) if payload else None,
+        created_at=datetime.datetime.utcnow(),
+    )
+    db.add(ev)
+    db.flush()
+    return ev
+
+
+def list_task_events(db: Session, task_id: int, limit: int = 50) -> List[Dict]:
+    rows = (
+        db.query(AutomationTaskEvent)
+        .filter(AutomationTaskEvent.task_id == task_id)
+        .order_by(AutomationTaskEvent.id.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for r in reversed(rows):
+        payload = None
+        if r.payload_json:
+            try:
+                payload = json.loads(r.payload_json)
+            except (json.JSONDecodeError, TypeError):
+                payload = r.payload_json
+        result.append({
+            "id": r.id,
+            "event_type": r.event_type,
+            "event_message": r.event_message,
+            "payload": payload,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return result
+
+
+def rerun_task(db: Session, task_id: int, *, created_by_user_id: Optional[int] = None) -> AutomationTask:
+    """人工重跑终态任务（Phase2：方案 8.4 失败重试 + 人工重跑）。
+
+    仅 failed / cancelled 任务可重跑（保持外部副作用只执行一次的语义：
+    成功/进行中的任务不重复入队）。重跑后 attempts 归零、错误清空、立即可用。
+    """
+    t = get_task(db, task_id)
+    if t.status in (TASK_QUEUED, TASK_RUNNING, TASK_RETRY_WAIT):
+        raise TaskError("任务正在进行中，不能重跑")
+    if t.status == TASK_SUCCEEDED:
+        raise TaskError("任务已成功完成，不能重跑")
+    t.status = TASK_QUEUED
+    t.attempts = 0
+    t.error_code = None
+    t.error_message = None
+    t.locked_at = None
+    t.locked_by = None
+    t.finished_at = None
+    t.available_at = datetime.datetime.utcnow()
+    t.last_event = None
+    record_task_event(db, t, "rerun", "人工触发重新执行",
+                      payload={"by_user": created_by_user_id, "prior_status": t.status})
+    db.commit()
+    db.refresh(t)
+    return t
+
+
 def cancel_task(db: Session, task_id: int) -> AutomationTask:
     t = get_task(db, task_id)
     if t.status in (TASK_RUNNING,):
@@ -144,6 +217,7 @@ def cancel_task(db: Session, task_id: int) -> AutomationTask:
         return t
     t.status = TASK_CANCELLED
     t.finished_at = datetime.datetime.utcnow()
+    record_task_event(db, t, "cancelled", "任务被取消")
     db.commit()
     db.refresh(t)
     return t
@@ -197,6 +271,9 @@ def mark_succeeded(db: Session, task: AutomationTask, event: Optional[Dict] = No
     task.locked_at = None
     if event is not None:
         task.last_event = json.dumps(event, ensure_ascii=False)
+    record_task_event(db, task, "succeeded",
+                      message=str((event or {}).get("message") or "任务执行成功"),
+                      payload=event)
     db.commit()
     db.refresh(task)
     return task
@@ -224,6 +301,10 @@ def mark_failed(
              "error_code": error_code, "retry_in_s": backoff},
             ensure_ascii=False,
         )
+        record_task_event(db, task, "retry_wait",
+                          message=f"第 {task.attempts} 次尝试失败，{backoff}s 后重试",
+                          payload={"error_code": error_code, "retry_in_s": backoff,
+                                   "attempt": task.attempts})
     else:
         task.status = TASK_FAILED
         task.finished_at = datetime.datetime.utcnow()
@@ -234,6 +315,9 @@ def mark_failed(
             {"attempt": task.attempts, "status": "failed", "error_code": error_code},
             ensure_ascii=False,
         )
+        record_task_event(db, task, "failed",
+                          message=f"任务最终失败: {error_message[:200]}",
+                          payload={"error_code": error_code, "attempt": task.attempts})
     db.commit()
     db.refresh(task)
     return task

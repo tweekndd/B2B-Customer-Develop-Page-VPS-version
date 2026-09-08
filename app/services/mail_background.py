@@ -19,6 +19,7 @@ from app.services import mail_sync_service
 logger = logging.getLogger("mail_background")
 
 _MAINTENANCE_INTERVAL = int(os.environ.get("MAIL_MAINTENANCE_INTERVAL", "21600"))  # 6h
+_INBOX_SYNC_INTERVAL = int(os.environ.get("INBOX_SYNC_INTERVAL", "1800"))  # 30min
 
 
 async def periodic_mail_maintenance():
@@ -29,6 +30,34 @@ async def periodic_mail_maintenance():
         except Exception as e:
             logger.warning("邮箱后台维护失败: %s", e)
         await asyncio.sleep(_MAINTENANCE_INTERVAL)
+
+
+async def periodic_inbox_sync():
+    """Phase2：周期执行收件箱同步（ismap 增量 + 回复分类 + 待办生成）。
+
+    只处理配置了 IMAP 且 enabled 的 mail_sender_accounts；
+    INBOX_SYNC_INTERVAL 环境变量可调（默认 30 分钟）。"""
+    while True:
+        try:
+            await asyncio.to_thread(run_inbox_sync_once)
+        except Exception as e:
+            logger.warning("收件箱周期同步失败: %s", e)
+        await asyncio.sleep(_INBOX_SYNC_INTERVAL)
+
+
+def run_inbox_sync_once():
+    """执行一轮收件箱同步（独立 Session；账户级 fail-open）"""
+    db = SessionLocal()
+    try:
+        from app.services import inbox_sync_service as iss
+        results = iss.sync_all_accounts(db)
+        new_total = sum(s.get("new", 0) for s in results.values())
+        if new_total:
+            logger.info("收件箱周期同步完成，新增 %s 封回复", new_total)
+        else:
+            logger.debug("收件箱周期同步完成（无新回复）")
+    finally:
+        db.close()
 
 
 def run_maintenance_once():

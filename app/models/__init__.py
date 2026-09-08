@@ -29,7 +29,14 @@ from .outreach_send import (  # noqa: F401
     OutreachSendLog,
     UnsubscribeBlacklist,
 )
-from .automation import AutomationTask  # noqa: F401
+from .automation import AutomationTask, AutomationTaskEvent  # noqa: F401
+# Phase2（回复同步与 AI 分类）新增
+from .inbox import (  # noqa: F401
+    MailMessage,
+    MailAttachment,
+    CustomerStatusHistory,
+    CustomerTodo,
+)
 
 
 def init_db():

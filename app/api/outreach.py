@@ -314,3 +314,26 @@ def cancel_task_api(task_id: int, db: Session = Depends(get_db),
     except ts.TaskError as e:
         raise _err(e, 409)
     return {"message": "任务已取消", "task": ts.task_to_dict(t)}
+
+
+@router.post("/outreach/tasks/{task_id}/rerun")
+def rerun_task_api(task_id: int, db: Session = Depends(get_db),
+                   user=Depends(require_user)):
+    """人工重跑终态任务（Phase2：失败/取消任务重跑）"""
+    from app.services import task_service as ts
+    try:
+        t = ts.rerun_task(db, task_id, created_by_user_id=getattr(user, "id", None))
+    except ts.TaskError as e:
+        raise _err(e, 409)
+    return {"message": "任务已重新入队", "task": ts.task_to_dict(t)}
+
+
+@router.get("/outreach/tasks/{task_id}/events")
+def list_task_events_api(task_id: int, db: Session = Depends(get_db),
+                         user=Depends(require_user)):
+    from app.services import task_service as ts
+    try:
+        ts.get_task(db, task_id)
+    except ts.TaskError as e:
+        raise _err(e, 404)
+    return {"task_id": task_id, "events": ts.list_task_events(db, task_id)}

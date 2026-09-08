@@ -106,6 +106,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  [Gmail] 后台任务启动跳过: {e}")
 
+    # Phase2：收件箱周期同步（回复同步 + AI 分类 + 待办生成）
+    _inbox_sync_task = None
+    try:
+        from app.services import mail_background
+        _inbox_sync_task = asyncio.create_task(mail_background.periodic_inbox_sync())
+        print(f"  [Inbox] 收件箱同步后台任务已启动（{mail_background._INBOX_SYNC_INTERVAL}s）")
+    except Exception as e:
+        print(f"  [Inbox] 收件箱同步后台任务启动跳过: {e}")
+
     # V5.3 阶段3：缓存周期清理后台任务（数据库瘦身）
     _cache_cleanup_task = None
     try:
@@ -129,7 +138,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    for _task in (_mail_worker_task, _cache_cleanup_task, _app_worker_task):
+    for _task in (_mail_worker_task, _cache_cleanup_task, _app_worker_task, _inbox_sync_task):
         if _task is not None:
             _task.cancel()
             try:
@@ -351,6 +360,12 @@ async def outreach_page(request: Request):
 async def prompts_page(request: Request):
     """Prompt 管理页（Phase1：模板/版本/变量白名单/发布回滚）"""
     return _login_required_page(request, "prompts.html", active_nav="prompts")
+
+
+@app.get("/inbox")
+async def inbox_page(request: Request):
+    """回复中心页（Phase2：回复同步 / AI 分类 / 动作待办）"""
+    return _login_required_page(request, "inbox.html", active_nav="inbox")
 
 
 @app.get("/hunter")

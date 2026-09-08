@@ -91,7 +91,8 @@ def handle_send_email(db: Session, task: AutomationTask) -> Dict:
     if osvc.has_sent(db, idem_key):
         # 已发送：把草稿与任务一并推进为成功（防重复发送的关键幂等检查）
         _finalize_sent(db, draft, account, recipient, idem_key,
-                       provider_message_id=payload.get("provider_message_id"))
+                       provider_message_id=payload.get("provider_message_id"),
+                       task=task)
         return {"skipped": "already_sent", "draft_id": draft.id}
 
     # 退订名单检查（发送前最后一道闸）
@@ -163,7 +164,7 @@ def handle_send_email(db: Session, task: AutomationTask) -> Dict:
         db, draft, account, recipient, idem_key,
         provider_message_id=result.get("provider_message_id"),
         internet_message_id=result.get("internet_message_id"),
-        log=log,
+        log=log, task=task,
     )
     return {"sent": True, "draft_id": draft.id,
             "provider_message_id": result.get("provider_message_id")}
@@ -178,6 +179,7 @@ def _finalize_sent(
     provider_message_id: Optional[str] = None,
     internet_message_id: Optional[str] = None,
     log: Optional[OutreachSendLog] = None,
+    task: Optional[AutomationTask] = None,
 ):
     """发送成功后的状态收口（幂等可安全重复调用）。"""
     now = datetime.datetime.utcnow()
@@ -203,11 +205,21 @@ def _finalize_sent(
     draft.status = DRAFT_STATUS_SENT
     draft.updated_at = now
 
-    # 客户状态联动：已发邮件（不降级「已回复/成单」等更高状态）
+    # 客户状态联动：已发邮件（不降级「已回复/成单」等更高状态）—— 走 Phase2 状态机留痕
     customer = db.query(Customer).filter(Customer.id == draft.customer_id).first()
     if customer:
-        if customer.status not in ("已回复", "成单", "无效线索"):
-            customer.status = "已发邮件"
+        from app.services import customer_status as cs
+        try:
+            cs.transition_customer_status(
+                db, customer, "已发邮件", trigger="mail_send",
+                source_task_id=task.id if task else None,
+                source_message_id=None,
+            )
+        except cs.StatusTransitionError:
+            cs.record_history(db, customer_id=customer.id, old_status=customer.status,
+                              new_status="已发邮件", trigger="mail_send",
+                              source_task_id=task.id if task else None,
+                              note="已发邮件（状态不降级，仅留痕）")
         customer.last_email_sent_at = now
 
     # 发信记录（详情页发信记录 tab 复用 V5.2 CustomerEmailActivity）

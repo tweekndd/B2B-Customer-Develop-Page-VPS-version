@@ -247,3 +247,21 @@ Priority: A(≥80) > B(≥60) > C(≥40) > D
 | Worker | `app/workers/runner.py`（独立进程 `python -m app.workers.runner`）+ `task_handlers.py`；`automation_tasks` 原子抢占/指数退避；`INAPP_WORKER=1` 时 Web 内建轻量 Worker 兜底 |
 
 **关键链路注意**：`approve → send` 两步（方案 9.2 人工确认边界）；`send` 会同步兜底执行任务并把客户状态联动为「已发邮件」并写 V5.2 `CustomerEmailActivity`（详情页发信记录可见）。真实发送前请确认：① 服务器 himalaya 已安装（Docker 内置；本机 `brew install himalaya`）；② 发件账户已保存并通过「测试连接」；③ 至少一个 active Prompt 模板已发布。
+
+## Phase2（回复同步与 AI 分类）
+
+闭环：`收件箱拉取 → 去重 → 匹配客户 → AI 分类 → 创建待办/黑名单 → 回复中心`。收发同箱，IMAP 复用 Phase1 发件账户凭据。
+
+| 能力 | 入口 |
+|------|------|
+| 收件同步（增量） | `app/services/inbox_sync_service.py`：imaplib 增量 UIDVALIDITY+最大UID游标（`mail_sender_accounts.last_inbox_uid*`）；MIME 解析；正文/原始MIME/附件外置对象存储；去重键 `(provider, mail_account_id, provider_message_id)` 唯一 `uq_mail_message`；单账户 fail-open |
+| 客户匹配 | 复用 `email_domain_matcher`：官网可注册域名 + 手工邮箱域名两级；匹配后才创建待办/联动状态 |
+| AI 分类 | `reply_classifier.py`：规则预判退信/退订/OOO → LLM 结构化 JSON（白名单 `_sanitize`）→ 规则兜底。意图：rfq/interest/question/not_interested/unsubscribe/out_of_office/bounce/complaint/other |
+| 黑名单 | bounce/unsubscribe 自动进 `unsubscribe_blacklist`（即使未匹配客户也执行） |
+| 客户状态机 | `app/services/customer_status.py`：`transition_customer_status` 人工=任意跳转，auto(`mail_send/mail_reply/bounce/unsubscribe`)=严格只升不降；`无效线索` 为终态（auto 不入，`revive_customer` 强制回待联系）；同状态重入也留痕；`customer_status_history` 审计 |
+| 待办 | `customer_todos`：todo_type respond/follow_up/quote_request/complaint/other；priority 1=高/2=中/3=低 |
+| 回复中心 | `GET /inbox`；API `app/api/inbox.py`：列表/详情(按需读正文)/附件下载/处理/忽略/待办done-reopen-dismiss/手动 `POST /api/inbox/sync` |
+| 任务重跑/事件 | `task_service.py`：`rerun_task`（仅 failed/cancelled 可重跑，重置 attempts/error/available_at，记 `rerun` 事件）、`record_task_event`/`list_task_events`、`mark_succeeded/mark_failed/cancel_task` 记事件；`automation_task_events` 表 |
+| 周期同步 | `mail_background.periodic_inbox_sync()` + `run_inbox_sync_once()`；`INBOX_SYNC_INTERVAL` 默认 1800；`main.py` lifespan 启停；可在回复中心「同步」按钮手动触发 |
+
+**联动注意**：普通意图回复 → 客户状态「已发邮件」升「已回复」并创建待办；bounce/unsubscribe → 进黑名单 + 走状态机（因「无效线索」为 auto 终态，若客户已在更高状态则仅留痕等待人工确认）。Alembic：`003_phase2_inbox`（+5 表 + mail_sender_accounts 3 游标列）。AO tests：`tests/test_phase2_inbox.py`（monkeypatch `inbox_sync_service._connect_imap` + stub `reply_classifier.get_llm_manager`）。

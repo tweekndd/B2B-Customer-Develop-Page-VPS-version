@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}回复中心 - AI Trade Customer Analyzer{% endblock %}
+{% block page_title %}<i class="bi bi-inbox-fill me-2"></i>回复中心{% endblock %}
+
+{% block top_bar_actions %}
+<button class="btn btn-outline-primary btn-sm" onclick="syncInbox(true)" id="btnSync" title="立即同步收件箱">
+    <i class="bi bi-arrow-clockwise"></i> 立即同步
+</button>
+<button class="btn btn-outline-secondary btn-sm" onclick="loadAll()" title="刷新">
+    <i class="bi bi-arrow-clockwise"></i> 刷新
+</button>
+{% endblock %}
+
+{% block content %}
+<!-- 顶部统计 -->
+<div class="row g-3 mb-4" id="statsRow">
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
+        <div class="stats-icon mb-2"><i class="bi bi-inbox" style="color: var(--warm-500); font-size: 1.6rem;"></i></div>
+        <div class="stats-number" id="statTotal" style="font-weight: 700;">-</div>
+        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">全部回复</div>
+    </div></div></div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
+        <div class="stats-icon mb-2"><i class="bi bi-envelope-open" style="color: var(--accent-500); font-size: 1.6rem;"></i></div>
+        <div class="stats-number" id="statUnhandled" style="font-weight: 700;">-</div>
+        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">未处理</div>
+    </div></div></div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
+        <div class="stats-icon mb-2"><i class="bi bi-lightning-charge" style="color: #c8962c; font-size: 1.6rem;"></i></div>
+        <div class="stats-number" id="statRfq" style="font-weight: 700;">-</div>
+        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">询价</div>
+    </div></div></div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
+        <div class="stats-icon mb-2"><i class="bi bi-list-check" style="color: var(--success); font-size: 1.6rem;"></i></div>
+        <div class="stats-number" id="statTodos" style="font-weight: 700;">-</div>
+        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">进行中待办</div>
+    </div></div></div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
+        <div class="stats-icon mb-2"><i class="bi bi-slash-circle" style="color: #b02a2a; font-size: 1.6rem;"></i></div>
+        <div class="stats-number" id="statBounce" style="font-weight: 700;">-</div>
+        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">退信/退订</div>
+    </div></div></div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
+        <div class="stats-icon mb-2"><i class="bi bi-person-check" style="color: var(--info-color); font-size: 1.6rem;"></i></div>
+        <div class="stats-number" id="statMatched" style="font-weight: 700;">-</div>
+        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">已匹配客户</div>
+    </div></div></div>
+</div>
+
+<!-- Tab 导航 -->
+<ul class="nav nav-tabs mb-3" role="tablist" id="inboxTabs">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabMessages" type="button"><i class="bi bi-envelope me-1"></i>回复邮件</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTodos" type="button"><i class="bi bi-list-check me-1"></i>动作待办</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHelp" type="button"><i class="bi bi-question-circle me-1"></i>说明</button></li>
+</ul>
+
+<div class="tab-content">
+    <!-- 回复邮件 -->
+    <div class="tab-pane fade show active" id="tabMessages">
+        <div class="mb-3 d-flex gap-2 flex-wrap align-items-center">
+            <select id="msgClassFilter" class="form-select" style="width:auto;" onchange="loadMessages()">
+                <option value="">全部意图</option>
+                <option value="rfq">询价</option>
+                <option value="interest">意向</option>
+                <option value="question">提问</option>
+                <option value="not_interested">婉拒</option>
+                <option value="bounce">退信</option>
+                <option value="unsubscribe">退订</option>
+                <option value="out_of_office">自动回复</option>
+                <option value="complaint">投诉</option>
+                <option value="other">其他</option>
+            </select>
+            <select id="msgHandledFilter" class="form-select" style="width:auto;" onchange="loadMessages()">
+                <option value="">全部处理状态</option>
+                <option value="unhandled">未处理</option>
+                <option value="handled">已处理</option>
+            </select>
+            <label class="form-check form-check-inline ms-1 mb-0 d-flex align-items-center">
+                <input class="form-check-input me-1" type="checkbox" id="onlyMatched" onchange="loadMessages()">
+                <span class="small text-secondary">只看已匹配客户</span>
+            </label>
+        </div>
+        <div class="table-responsive"><table class="table table-hover align-middle">
+            <thead><tr><th>意图</th><th>客户</th><th>发件人</th><th>主题</th><th>时间</th><th>状态</th><th>附件</th><th>操作</th></tr></thead>
+            <tbody id="messagesBody"></tbody>
+        </table></div>
+        <nav class="mt-2" id="msgPager"></nav>
+    </div>
+
+    <!-- 动作待办 -->
+    <div class="tab-pane fade" id="tabTodos">
+        <div class="mb-3 d-flex gap-2 flex-wrap align-items-center">
+            <select id="todoStatusFilter" class="form-select" style="width:auto;" onchange="loadTodos()">
+                <option value="open">进行中</option>
+                <option value="done">已完成</option>
+                <option value="dismissed">已忽略</option>
+            </select>
+            <select id="todoTypeFilter" class="form-select" style="width:auto;" onchange="loadTodos()">
+                <option value="">全部类型</option>
+                <option value="respond">需回复</option>
+                <option value="follow_up">跟进</option>
+                <option value="quote_request">询价</option>
+                <option value="complaint">投诉</option>
+                <option value="other">其他</option>
+            </select>
+        </div>
+        <div class="row g-3" id="todosList"></div>
+    </div>
+
+    <!-- 说明 -->
+    <div class="tab-pane fade" id="tabHelp">
+        <div class="card border-0"><div class="card-body">
+            <h6 class="fw-bold mb-3"><i class="bi bi-info-circle me-1"></i>回复中心（Phase2）</h6>
+            <ul class="small text-secondary mb-3" style="line-height:2;">
+                <li>本页汇总发件账户收件箱的客户回复：<strong>新回复 → 去重 → 匹配客户 → AI 分类 → 创建动作待办</strong>。</li>
+                <li>邮件正文与附件已外置到对象存储，列表页不加载大字段，点击「查看」才读取正文。</li>
+                <li>退信 / 退订会自动加入「禁止联系名单」，并尝试将客户标记为无效线索（不降级规则下仅留痕，由人工确认）。</li>
+                <li>「立即同步」触发 imaplib 增量拉取。生产环境由 <code>INBOX_SYNC_INTERVAL</code>（默认 30 分钟）周期任务自动同步。</li>
+                <li>点「生成草稿」可跳转到客户详情页，基于该回复快速发起新一轮外联。</li>
+            </ul>
+        </div></div>
+    </div>
+</div>
+
+<!-- 邮件详情模态框 -->
+<div class="modal fade" id="msgDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="modalTitle" style="max-width:75%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2 text-secondary small" id="modalMeta"></div>
+                <div id="modalClass" class="mb-3"></div>
+                <div class="border rounded p-3 bg-light" id="modalBody" style="white-space:pre-wrap; font-size:0.9rem;"></div>
+                <div class="mt-3" id="modalAttachments"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button class="btn btn-sm btn-outline-success" onclick="openCustomerFromModal()"><i class="bi bi-person"></i> 打开客户</button>
+                <button class="btn btn-sm btn-outline-primary" onclick="makeDraftFromModal()"><i class="bi bi-pencil-square"></i> 生成跟进草稿</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="ignoreModalMessage()"><i class="bi bi-eye-slash"></i> 忽略</button>
+                <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', path='/js/inbox.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    loadAll();
+});
+/* 切换 Tab 时刷新对应列表 */
+document.querySelectorAll('#inboxTabs [data-bs-toggle="tab"]').forEach(function (t) {
+    t.addEventListener('shown.bs.tab', function (e) {
+        if (e.target.getAttribute('data-bs-target') === '#tabTodos') loadTodos();
+    });
+});
+</script>
+{% endblock %}

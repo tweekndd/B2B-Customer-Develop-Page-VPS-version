@@ -57,3 +57,16 @@ class AutomationTask(Base):
         Index("idx_tasks_pick", "status", "available_at", "priority"),
         Index("idx_tasks_type_status", "task_type", "status"),
     )
+
+
+class AutomationTaskEvent(Base):
+    """任务事件流水（Phase2：从 automation_tasks.last_event 拆出，支持人工重跑留痕）"""
+    __tablename__ = "automation_task_events"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_id = Column(Integer, index=True, nullable=False, comment="automation_tasks.id")
+    event_type = Column(String(30), nullable=False, index=True,
+                        comment="queued/claimed/started/retry_wait/failed/succeeded/cancelled/rerun")
+    event_message = Column(Text, nullable=True, comment="事件说明（错误信息/成功摘要）")
+    payload_json = Column(Text, nullable=True, comment="事件附加数据（尝试次数/错误码等）")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)

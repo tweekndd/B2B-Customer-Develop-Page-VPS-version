@@ -106,6 +106,12 @@ EXPECTED_TABLES = {
     "outreach_send_logs",
     "unsubscribe_blacklist",
     "automation_tasks",
+    # Phase2（回复同步与 AI 分类）
+    "mail_messages",
+    "mail_attachments",
+    "customer_status_history",
+    "customer_todos",
+    "automation_task_events",
 }
 
 

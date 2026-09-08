@@ -75,6 +75,11 @@ class MailSenderAccount(Base):
     last_test_ok = Column(Integer, nullable=True, comment="最近测试是否成功 1/0")
     last_error = Column(Text, nullable=True, comment="最近错误（测试/发送时回写）")
 
+    # Phase2 新增：IMAP 增量同步游标（避免每次全量拉取）
+    last_inbox_sync_at = Column(DateTime, nullable=True, comment="最近一次收件同步时间")
+    last_inbox_uid_validity = Column(String(40), nullable=True, comment="最近一次同步的 UIDVALIDITY")
+    last_inbox_uid = Column(String(20), nullable=True, comment="最近一次同步到的最大 UID")
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow,
                         onupdate=datetime.datetime.utcnow)

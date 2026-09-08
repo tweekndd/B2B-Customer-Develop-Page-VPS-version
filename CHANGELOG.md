@@ -1,5 +1,26 @@
 # 更新日志
 
+## v6.2 Phase2（2026-09-08）
+
+### 💬 回复同步与 AI 分类（方案 Phase2 · 回复中心闭环）
+
+按《AI 客户开发与邮件外联系统总体开发方案》Phase2「回复同步与 AI 分类」执行，交付链路：**新回复 → 去重 → 匹配客户 → AI 分类 → 创建待办/黑名单**。收发同箱：IMAP 复用 Phase1 发件账户凭据，实现“发出去 → 看得见回复 → 自动懂你聊什么 → 该办的事生成待办”。
+
+- **收件同步（增量）** `app/services/inbox_sync_service.py`：imaplib 增量拉取 INBOX，游标 `mail_sender_accounts.last_inbox_uid_validity/last_inbox_uid/last_inbox_sync_at`；UIDVALIDITY 变化自动放弃游标全量重吸；单次同步上限 200 封；正文/原始 MIME/附件统一外置对象存储；去重键 `(provider, mail_account_id, provider_message_id)` 唯一约束（Message-ID 缺失回退 `uid-{uid}`）；单账户 fail-open（失败写 `last_error`，其它账户照常同步）
+- **客户匹配**：复用 `email_domain_matcher` 域名策略 —— 从发件人地址经官网可注册域名 / 手工邮箱域名两级定位客户；匹配成功才创建待办 / 联动客户状态，未匹配仍保留邮件记录并分类（可用于退信/退订黑名单）
+- **AI 回复意图分类** `app/services/reply_classifier.py`：规则预判退信（送达失败头/`multipart/report`）/退订/OOO → LLM 结构化 JSON 分类（统一走 `get_llm_manager` + `extract_json`，输出白名单 `_sanitize` 归一；非法输出自动回退规则兜底，绝不阻断）→ 意图：rfq/interest/question/not_interested/unsubscribe/out_of_office/bounce/complaint/other
+- **退信/退订自动黑名单**：检测到 bounce → 黑名单 `x-failed-recipients`/发件人；unsubscribe → 黑名单发件人（reason=bounce/unsubscribe）；即使未匹配客户也生效
+- **客户状态机** `app/services/customer_status.py`：`transition_customer_status()` 人工 = 任意跳转，auto(发送/回复/退信/退订) = 严格“只升不降”；「无效线索」为终态（auto 永不进入，`revive_customer()` 强制回待联系）；同状态重入也写审计，全程留痕 `customer_status_history`
+- **动作待办**：rfq/interest/question/complaint 意图 → 匹配客户生成 `customer_todos`（todo_type = quote_request/follow_up/respond/complaint/other；priority 1=高/2=中/3=低）；回复中心可 done / reopen / dismiss
+- **任务重跑与事件流水** `task_service.py`：`rerun_task`（仅 failed/cancelled 可人工重跑，重置 attempts/error/available_at 并记 `rerun` 事件）、`record_task_event`/`list_task_events`、发送成功/失败/取消统一记 `automation_task_events`；`_finalize_sent` 状态机重构走 `transition_customer_status(trigger=mail_send)`
+- **回复中心 UI**：侧边栏「回复中心」(`GET /inbox`)——统计行（全部/未处理/询价/进行中待办/退信退订/已匹配客户）+ 双 Tab（回复邮件 / 动作待办）+ 详情弹窗（正文按需加载 + 附件下载）+ 手动同步按钮；`app/api/inbox.py` REST（列表/详情/附件/处理/忽略/待办流转/同步）+ `outreach.py` 补任务重跑与事件接口
+- **周期同步**：`mail_background.periodic_inbox_sync()`（`INBOX_SYNC_INTERVAL` 默认 1800s）+ `run_inbox_sync_once()`；`main.py` lifespan 启停；可在回复中心手动触发
+- **模型/迁移**：新增 5 张表（mail_messages/mail_attachments/customer_todos/customer_status_history/automation_task_events），Alembic `003_phase2_inbox`（+ mail_sender_accounts 3 游标列），`EXPECTED_TABLES` 34 张
+
+**验证**：`pytest tests/` 全绿 **471 passed**（新增 `tests/test_phase2_inbox.py` 24 项：状态机只升不降/终态/审计留痕、分类规则预判与 LLM 兜底与白名单归一、收件同步全链路去重/匹配/外置/待办/状态联动、退信退订黑名单、附件外置、无 IMAP 跳过与连接失败 fail-open、任务重跑与事件、回复中心 API E2E）。已有库升级：`alembic upgrade head`（开发库 `DB_AUTO_CREATE=1` 自动建表）。真实同步需：发件账户已配置 IMAP 并保存凭据（设置页「测试连接」）。
+
+---
+
 ## v6.1 Phase1（2026-09-07）
 
 ### 📧 邮件外联基础（方案 Phase1 · 10 项全落地）
