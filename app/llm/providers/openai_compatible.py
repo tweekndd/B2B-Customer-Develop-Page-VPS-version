@@ -151,7 +151,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         """发送 "Hello" 测试消息，返回实际使用的模型名"""
         model = model or self.default_model
         messages = [{"role": "user", "content": "Hello"}]
-        result = await self.chat(messages, model=model, max_tokens=10)
+        # 推理模型（如 DeepSeek reasoner 系）会先把输出 token 用于思考
+        # （reasoning_content），max_tokens 太小会导致正式回复为空，
+        # 被误判为“模型返回空内容”。这里给足预算再判断。
+        result = await self.chat(messages, model=model, max_tokens=512)
         if not result.content.strip():
             raise LLMContentError("模型返回空内容，连接测试失败")
         return result.model or model

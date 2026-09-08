@@ -146,6 +146,27 @@ class TestProviders:
         p = GLMProvider(api_key="k", default_model="a", fallback_models=["a", "b"])
         assert p.get_models() == ["a", "b"]
 
+    def test_connection_test_gives_reasoning_models_enough_tokens(self, monkeypatch):
+        """推理模型（如 DeepSeek reasoner）输出 token 先用于思考，
+        max_tokens 太小会导致 content 为空而误报「模型返回空内容」。
+        测试连接必须给足 token 预算。
+        """
+        captured = {}
+
+        async def fake_chat(self, messages, model=None, temperature=0.3, max_tokens=4096):
+            captured["max_tokens"] = max_tokens
+            captured["model"] = model
+            return LLMChatResult(content="Hello! How can I help you today?", model=model)
+
+        monkeypatch.setattr(OpenAICompatibleProvider, "chat", fake_chat)
+        p = OpenAICompatibleProvider(api_key="k", default_model="deepseek-v4-flash")
+        assert asyncio.run(p.test_connection()) == "deepseek-v4-flash"
+        assert captured["model"] == "deepseek-v4-flash"
+        assert captured["max_tokens"] >= 256, (
+            f"连接测试 token 预算过低（{captured['max_tokens']}），"
+            "推理模型将因思考耗尽预算返回空内容"
+        )
+
 
 # ═══════════════════════════════════════════
 # router（自动 Fallback）
