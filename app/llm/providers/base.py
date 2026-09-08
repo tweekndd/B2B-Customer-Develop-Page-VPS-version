@@ -69,3 +69,7 @@ class BaseLLMProvider(ABC):
             if m and m not in models:
                 models.append(m)
         return models
+
+    async def list_models(self) -> List[str]:
+        """从 provider 远端发现模型；不支持时返回本地元数据列表。"""
+        return self.get_models()

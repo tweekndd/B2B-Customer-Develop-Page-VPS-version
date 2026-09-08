@@ -21,6 +21,7 @@ from app.llm.providers.base import BaseLLMProvider, LLMChatResult
 from app.llm.providers.glm import GLMProvider
 from app.llm.providers.openai_compatible import OpenAICompatibleProvider
 from app.llm.router import LLMRouter
+from app.llm.registry import canonical_provider, normalize_base_url
 
 logger = logging.getLogger("llm.manager")
 
@@ -45,11 +46,11 @@ class LLMManager:
 
     def get_provider(self, config: LLMConfig) -> BaseLLMProvider:
         """按配置创建 Provider 实例"""
-        provider_name = (config.provider or "glm").strip().lower()
-        provider_cls = _PROVIDER_CLASSES.get(provider_name, GLMProvider)
+        provider_name = canonical_provider(config.provider or "glm")
+        provider_cls = _PROVIDER_CLASSES.get(provider_name, OpenAICompatibleProvider)
         return provider_cls(
             api_key=config.api_key,
-            base_url=config.base_url,
+            base_url=normalize_base_url(config.base_url, provider_name),
             default_model=config.default_model,
             fallback_models=config.fallback_models,
         )
@@ -118,6 +119,26 @@ class LLMManager:
         """返回当前用户配置下可用的模型列表"""
         config = resolve_config(user_id)
         return self.get_provider(config).get_models()
+
+    async def list_models(
+        self,
+        user_id: Optional[int] = None,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> List[str]:
+        """优先用临时表单参数，否则使用用户已保存配置，远程发现模型。"""
+        if provider or api_key or base_url:
+            config = LLMConfig(
+                provider=provider or "glm", api_key=api_key or "",
+                base_url=base_url or "", default_model="",
+            )
+        else:
+            config = resolve_config(user_id)
+        if not config.api_key:
+            from app.llm.exceptions import LLMAuthenticationError
+            raise LLMAuthenticationError("未配置 API Key")
+        return await self.get_provider(config).list_models()
 
 
 # 模块级单例

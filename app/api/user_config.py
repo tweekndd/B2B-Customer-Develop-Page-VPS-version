@@ -174,6 +174,12 @@ class LLMTestRequest(BaseModel):
     fallback_models: Optional[List[str]] = None
 
 
+class LLMModelsRequest(BaseModel):
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+
+
 @router.post("/user-config/llm/test")
 async def test_llm_connection(
     req: LLMTestRequest,
@@ -201,3 +207,27 @@ async def test_llm_connection(
         return {"success": False, "message": str(e)}
     except Exception as e:
         return {"success": False, "message": f"连接失败: {str(e)[:200]}"}
+
+
+@router.get("/user-config/llm/providers")
+def list_llm_providers(user=Depends(require_user)):
+    """返回可选 provider 的默认 Base URL 与本地兜底模型。"""
+    from app.llm.registry import provider_options
+    return {"providers": provider_options()}
+
+
+@router.post("/user-config/llm/models")
+async def list_llm_models(req: LLMModelsRequest, user=Depends(require_user)):
+    """使用临时 API 参数调用 GET /models，返回当前 Key 实际可用模型。"""
+    from app.llm.manager import get_llm_manager
+    from app.llm.exceptions import LLMError
+    try:
+        models = await get_llm_manager().list_models(
+            user_id=user.id, provider=req.provider, api_key=req.api_key,
+            base_url=req.base_url,
+        )
+        return {"success": True, "models": models}
+    except LLMError as e:
+        return {"success": False, "models": [], "message": str(e)}
+    except Exception as e:
+        return {"success": False, "models": [], "message": f"获取模型失败: {str(e)[:200]}"}

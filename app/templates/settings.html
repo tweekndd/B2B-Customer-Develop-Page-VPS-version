@@ -53,6 +53,7 @@
                         <label class="form-label">默认模型</label>
                         <input type="text" class="form-control" id="llmDefaultModel" placeholder="glm-4.7-flash" list="modelSuggest">
                         <datalist id="modelSuggest"></datalist>
+                        <div class="form-text">可手动输入，也可用 API Key 获取该 Provider 当前可用模型。</div>
                     </div>
                     <div class="col-12">
                         <label class="form-label">备用模型（逗号分隔，主模型失败时自动降级）</label>
@@ -61,6 +62,9 @@
                 </div>
 
                 <div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
+                    <button class="btn btn-outline-secondary" onclick="fetchLlmModels()" id="btnFetchLlmModels">
+                        <i class="bi bi-cloud-download me-1"></i>获取模型列表
+                    </button>
                     <button class="btn btn-outline-info" onclick="testLlmConnection()" id="btnTestLlm">
                         <i class="bi bi-plug me-1"></i>测试连接
                     </button>

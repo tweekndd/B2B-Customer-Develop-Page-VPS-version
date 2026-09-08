@@ -14,6 +14,8 @@ from typing import List, Optional, Dict, Any
 
 import httpx
 
+from app.llm.registry import chat_url, model_ids, models_url
+
 from app.llm.exceptions import (
     LLMAuthenticationError,
     LLMConnectionError,
@@ -50,12 +52,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     """OpenAI 兼容协议 Provider"""
 
     def _build_url(self) -> str:
-        url = (self.base_url or "").strip().rstrip("/")
+        url = chat_url(self.base_url)
         if not url:
             raise LLMError("未配置 Base URL")
-        if url.endswith("/chat/completions"):
-            return url
-        return f"{url}/chat/completions"
+        return url
 
     def _build_headers(self) -> Dict[str, str]:
         return {
@@ -155,3 +155,20 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         if not result.content.strip():
             raise LLMContentError("模型返回空内容，连接测试失败")
         return result.model or model
+
+    async def list_models(self) -> List[str]:
+        """通过 OpenAI 兼容的 GET /models 获取当前 Key 可用模型。"""
+        if not self.api_key:
+            raise LLMAuthenticationError("未配置 API Key")
+        client = _get_shared_client(self.timeout)
+        try:
+            response = await client.get(models_url(self.base_url), headers=self._build_headers())
+            response.raise_for_status()
+            return model_ids(response.json())
+        except httpx.TimeoutException as e:
+            raise LLMTimeoutError(f"获取模型列表超时（>{self.timeout}s）") from e
+        except httpx.HTTPStatusError as e:
+            self._classify_http_error(e)
+        except (httpx.HTTPError, ValueError) as e:
+            raise LLMConnectionError(f"获取模型列表失败: {e}") from e
+        return []

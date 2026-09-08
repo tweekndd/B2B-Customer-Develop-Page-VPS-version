@@ -5,7 +5,7 @@
 'use strict';
 
 // ── Provider 默认值 ──
-const PROVIDER_DEFAULTS = {
+let PROVIDER_DEFAULTS = {
     glm: {
         base_url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
         model: 'glm-4.7-flash',
@@ -33,6 +33,7 @@ const PROVIDER_DEFAULTS = {
     },
     custom: { base_url: '', model: '', fallbacks: [] },
 };
+let _remoteModels = [];
 
 // ── 邮箱服务字段定义 ──
 const EMAIL_SERVICES = [
@@ -150,6 +151,36 @@ function onProviderChange() {
         opt.value = m;
         dl.appendChild(opt);
     });
+}
+
+async function loadLlmProviders() {
+    try {
+        const data = await _fetchWithTimeout('/api/user-config/llm/providers', {}, 15000);
+        (data.providers || []).forEach(p => {
+            PROVIDER_DEFAULTS[p.id] = { base_url: p.base_url || '', model: p.default_model || '', fallbacks: (p.models || []).filter(m => m !== p.default_model) };
+            const sel = document.getElementById('llmProvider');
+            if (sel && ![...sel.options].some(o => o.value === p.id)) {
+                const opt = document.createElement('option'); opt.value = p.id; opt.textContent = p.name; sel.appendChild(opt);
+            }
+        });
+    } catch (err) { console.warn('加载 provider 列表失败，使用内置列表', err); }
+}
+
+async function fetchLlmModels() {
+    const btn = document.getElementById('btnFetchLlmModels');
+    const apiKey = document.getElementById('llmApiKey').value.trim();
+    if (!apiKey) { showToast('请先输入 API Key 后获取模型', 'warning'); return; }
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>获取中...';
+    try {
+        const res = await _fetchWithTimeout('/api/user-config/llm/models', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ provider: document.getElementById('llmProvider').value, api_key: apiKey, base_url: document.getElementById('llmBaseUrl').value.trim() || null }) }, 60000);
+        if (!res.success || !res.models.length) throw new Error(res.message || 'Provider 未返回模型列表');
+        _remoteModels = res.models;
+        const dl = document.getElementById('modelSuggest'); dl.innerHTML = '';
+        res.models.forEach(m => { const o = document.createElement('option'); o.value = m; dl.appendChild(o); });
+        const model = document.getElementById('llmDefaultModel'); if (!model.value || !res.models.includes(model.value)) model.value = res.models[0];
+        showToast(`已获取 ${res.models.length} 个可用模型`, 'success');
+    } catch (err) { showToast('获取模型失败: ' + err.message, 'danger'); }
+    finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>获取模型列表'; }
 }
 
 function renderLlmConfig(config, effective) {
@@ -644,6 +675,7 @@ async function loadMailAccounts() {
 
 async function loadAll() {
     try {
+        await loadLlmProviders();
         const data = await _fetchWithTimeout('/api/user-config/');
         const savedMap = {};
         (data.saved_configs || []).forEach(c => { savedMap[c.service] = c; });
@@ -671,6 +703,7 @@ document.addEventListener('DOMContentLoaded', loadAll);
 window.onProviderChange = onProviderChange;
 window.saveLlmConfig = saveLlmConfig;
 window.testLlmConnection = testLlmConnection;
+window.fetchLlmModels = fetchLlmModels;
 window.saveGenericService = saveGenericService;
 window.deleteService = deleteService;
 window.applyPreferredEngine = applyPreferredEngine;
