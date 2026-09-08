@@ -6,10 +6,14 @@
 导致已保存的 Key 永不生效、永远报“未配置 API Key”。
 修复后：未显式传 api_key 时以已保存配置（用户配置→环境变量）为基底。
 """
+import asyncio
 import pytest
+
+from unittest import mock
 
 from app.llm.config import LLMConfig
 from app.llm.manager import LLMManager
+from app.llm.providers.base import LLMChatResult
 
 manager = LLMManager()
 
@@ -62,6 +66,27 @@ def test_explicit_overrides_win_over_saved_base():
     assert cfg.api_key, "应使用已保存 Key"
     assert cfg.default_model == "glm-4.6v-flash"
     assert cfg.fallback_models == []
+
+
+def test_chat_stamps_provider_on_real_result():
+    """chat() 返回的真实 LLMChatResult 必须带 provider 字段（曾缺失导致
+    outreach_generation_service 读取 result.provider 抛 AttributeError）。"""
+    mgr = LLMManager()
+    fake_router = mock.MagicMock()
+
+    async def fake_chat(messages, model=None, fallback_models=None, temperature=0.3, max_tokens=4096):
+        return LLMChatResult(content="hello", model=model)
+
+    fake_router.chat = fake_chat
+    with mock.patch.object(mgr, "_get_router", return_value=fake_router), \
+         mock.patch("app.llm.manager.resolve_config",
+                    return_value=LLMConfig(provider="glm", api_key="k", default_model="glm-4.7-flash")):
+        result = asyncio.run(
+            mgr.chat([{"role": "user", "content": "hi"}], user_id=None)
+        )
+    assert result is not None
+    assert isinstance(result, LLMChatResult)
+    assert result.provider == "glm"
 
 
 if __name__ == "__main__":

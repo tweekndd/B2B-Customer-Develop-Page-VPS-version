@@ -184,6 +184,7 @@ class LLMModelsRequest(BaseModel):
 async def test_llm_connection(
     req: LLMTestRequest,
     user=Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     """测试 LLM 连通性。
 
@@ -201,6 +202,7 @@ async def test_llm_connection(
             base_url=req.base_url,
             model=req.model,
             fallback_models=req.fallback_models,
+            db=db,
         )
         return {"success": True, "message": f"连接成功，模型: {model}"}
     except LLMError as e:
@@ -217,14 +219,14 @@ def list_llm_providers(user=Depends(require_user)):
 
 
 @router.post("/user-config/llm/models")
-async def list_llm_models(req: LLMModelsRequest, user=Depends(require_user)):
+async def list_llm_models(req: LLMModelsRequest, user=Depends(require_user), db: Session = Depends(get_db)):
     """使用临时 API 参数调用 GET /models，返回当前 Key 实际可用模型。"""
     from app.llm.manager import get_llm_manager
     from app.llm.exceptions import LLMError
     try:
         models = await get_llm_manager().list_models(
             user_id=user.id, provider=req.provider, api_key=req.api_key,
-            base_url=req.base_url,
+            base_url=req.base_url, db=db,
         )
         return {"success": True, "models": models}
     except LLMError as e:

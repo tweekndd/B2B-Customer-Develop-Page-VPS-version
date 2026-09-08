@@ -18,6 +18,7 @@ class LLMChatResult:
     content: str = ""
     finish_reason: str = ""
     model: str = ""
+    provider: str = ""
     raw: Optional[Dict[str, Any]] = None
 
 

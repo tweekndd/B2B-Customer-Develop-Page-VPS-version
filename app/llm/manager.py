@@ -73,13 +73,16 @@ class LLMManager:
             return None
 
         router = self._get_router(config)
-        return await router.chat(
+        result = await router.chat(
             messages,
             model=model or config.default_model,
             fallback_models=config.fallback_models,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if result is not None:
+            result.provider = canonical_provider(config.provider or "glm")
+        return result
 
     async def test_connection(
         self,
@@ -89,6 +92,7 @@ class LLMManager:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         fallback_models: Optional[List[str]] = None,
+        db=None,
     ) -> str:
         """连通性测试。
 
@@ -103,6 +107,7 @@ class LLMManager:
             base_url=base_url,
             model=model,
             fallback_models=fallback_models,
+            db=db,
         )
 
         if not config.api_key:
@@ -124,6 +129,7 @@ class LLMManager:
         provider: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        db=None,
     ) -> List[str]:
         """优先用临时表单参数，否则使用用户已保存配置，远程发现模型。"""
         config = self._resolve_config(
@@ -131,6 +137,7 @@ class LLMManager:
             provider=provider,
             api_key=api_key,
             base_url=base_url,
+            db=db,
         )
         if not config.api_key:
             from app.llm.exceptions import LLMAuthenticationError
@@ -145,6 +152,7 @@ class LLMManager:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         fallback_models: Optional[List[str]] = None,
+        db=None,
     ) -> LLMConfig:
         """组装一次调用/测试的 LLM 配置。
 
@@ -161,7 +169,7 @@ class LLMManager:
                 fallback_models=fallback_models or [],
             )
 
-        config = resolve_config(user_id)
+        config = resolve_config(user_id, db=db)
         if provider:
             config.provider = provider.strip() or config.provider
         if base_url:
