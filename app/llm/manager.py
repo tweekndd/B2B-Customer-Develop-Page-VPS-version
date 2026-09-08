@@ -92,20 +92,18 @@ class LLMManager:
     ) -> str:
         """连通性测试。
 
-        传入 provider/api_key/base_url/model 时使用临时配置（前端测试连接，未保存）；
-        否则使用当前用户已保存的配置。
+        传入了 api_key 时使用临时配置（前端测试连接，未保存），否则以当前用户已保存的配置为基底，
+        允许表单显式给出的 provider/base_url/model/fallback_models 覆盖对应字段。
         成功返回实际使用的模型名，失败抛出 LLMError 子类。
         """
-        if provider:
-            config = LLMConfig(
-                provider=provider,
-                api_key=api_key or "",
-                base_url=base_url or "",
-                default_model=model or "",
-                fallback_models=fallback_models or [],
-            )
-        else:
-            config = resolve_config(user_id)
+        config = self._resolve_config(
+            user_id=user_id,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            fallback_models=fallback_models,
+        )
 
         if not config.api_key:
             from app.llm.exceptions import LLMAuthenticationError
@@ -128,17 +126,51 @@ class LLMManager:
         base_url: Optional[str] = None,
     ) -> List[str]:
         """优先用临时表单参数，否则使用用户已保存配置，远程发现模型。"""
-        if provider or api_key or base_url:
-            config = LLMConfig(
-                provider=provider or "glm", api_key=api_key or "",
-                base_url=base_url or "", default_model="",
-            )
-        else:
-            config = resolve_config(user_id)
+        config = self._resolve_config(
+            user_id=user_id,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+        )
         if not config.api_key:
             from app.llm.exceptions import LLMAuthenticationError
             raise LLMAuthenticationError("未配置 API Key")
         return await self.get_provider(config).list_models()
+
+    @staticmethod
+    def _resolve_config(
+        user_id: Optional[int] = None,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        fallback_models: Optional[List[str]] = None,
+    ) -> LLMConfig:
+        """组装一次调用/测试的 LLM 配置。
+
+        - 显式传入了 api_key：使用临时配置（未保存的表单），其它字段留空则用默认值；
+        - 未传 api_key：以用户已保存配置（或环境变量）为基底，再让表单里显式给出的
+          provider/base_url/model/fallback_models 覆盖对应字段。
+        """
+        if api_key:
+            return LLMConfig(
+                provider=(provider or "glm").strip() or "glm",
+                api_key=api_key,
+                base_url=base_url or "",
+                default_model=model or "",
+                fallback_models=fallback_models or [],
+            )
+
+        config = resolve_config(user_id)
+        if provider:
+            config.provider = provider.strip() or config.provider
+        if base_url:
+            config.base_url = base_url.strip()
+        if model:
+            config.default_model = model.strip()
+        if fallback_models is not None:
+            config.fallback_models = list(fallback_models)
+        return config
 
 
 # 模块级单例
