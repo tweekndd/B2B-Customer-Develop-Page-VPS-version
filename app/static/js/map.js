@@ -28,15 +28,11 @@ function getTileUrl() {
     if (theme === 'dark') {
         return 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
     }
-    return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    return 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 }
 
 function getTileAttribution() {
-    const theme = document.documentElement.getAttribute('data-theme') || 'light';
-    if (theme === 'dark') {
-        return '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
-    }
-    return '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+    return '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
 }
 
 // ── 替换瓦片层（主题切换时调用） ──
