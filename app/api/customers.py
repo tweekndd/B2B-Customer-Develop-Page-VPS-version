@@ -28,6 +28,7 @@ from app.services.lead_persistence import (
 from app.services.email_composer import generate_email_draft, load_email_draft
 from app.services.search_task_service import request_stop
 from app.services.customer_email_service import bulk_upsert_customer_emails, upsert_customer_email, get_customer_emails
+from app.services.customer_search import apply_customer_search
 from app.services.intelligence_service import (
     save_website_snapshot,
     save_analysis_run,
@@ -126,7 +127,7 @@ _LIST_CUSTOMER_COLUMNS = (
 
 @router.get("/customers")
 def list_customers(
-    search: Optional[str] = Query(None, description="搜索关键词（支持公司名/网址/邮箱）"),
+    search: Optional[str] = Query(None, description="模糊搜索关键词（支持公司名/网址/邮箱等字段的片段匹配）"),
     country: Optional[str] = Query(None),
     priority: Optional[str] = Query(None),
     status: Optional[str] = Query(None, description="跟进状态筛选: 待联系/已发邮件/已回复/无效线索/成单"),
@@ -137,11 +138,7 @@ def list_customers(
 ):
     query = db.query(Customer)
     if search:
-        query = query.filter(
-            Customer.company_name.ilike(f"%{search}%")
-            | Customer.website.ilike(f"%{search}%")
-            | Customer.emails.ilike(f"%{search}%")
-        )
+        query = apply_customer_search(query, search)
     if country:
         query = query.filter(Customer.country == country)
     if priority:

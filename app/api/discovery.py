@@ -18,6 +18,7 @@ from app.database import get_db, Customer, SearchTask, SessionLocal
 from app.services.search_task_service import run_search_task, request_task_stop, get_paused_tasks, resume_paused_task
 from app.services.keyword_expander import expand_keywords
 from app.services.deduplication import find_existing_customer
+from app.services.customer_search import apply_customer_search
 from app.services.google_discovery import set_search_engine, get_search_engine_info
 from app.auth import consume_search_quota, get_search_depth_limit, require_user, User
 
@@ -312,7 +313,7 @@ async def task_stream(task_id: int, request: Request, db: Session = Depends(get_
 
 @router.get("/discovery/discovered-customers")
 def list_discovered_customers(
-    search: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="模糊搜索关键词（支持公司名/网址/邮箱等字段的片段匹配）"),
     country: Optional[str] = Query(None),
     priority: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None, description="按发现关键词筛选"),
@@ -324,7 +325,7 @@ def list_discovered_customers(
     """获取通过Google发现的公司列表（支持分页）"""
     query = db.query(Customer).filter(Customer.discovery_source == "Google")
     if search:
-        query = query.filter(Customer.company_name.ilike(f"%{search}%"))
+        query = apply_customer_search(query, search)
     if country:
         query = query.filter(Customer.country == country)
     if priority:

@@ -19,7 +19,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 import uvicorn
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -168,6 +168,16 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(router)
 app.include_router(filemanager_router)
+
+
+# ── 子应用静态资源登录校验（供 Nginx auth_request 使用） ──
+# 复用本站 Session（与 /login 同一账号密码），未登录返回 401，
+# Nginx 据此把 /dict/ 的访问重定向到 /login?next=...
+@app.get("/dict-auth", include_in_schema=False)
+def dict_auth_check(request: Request, db: Session = Depends(get_db)):
+    if get_user_from_session(request, db) is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    return {"ok": True}
 
 
 # ── 安全中间件：IP 限流 + 安全响应头 + 访问日志 ──

@@ -227,6 +227,106 @@ class TestCustomerCRUD:
 
 
 # ═══════════════════════════════════════════════
+# 客户模糊搜索
+# ═══════════════════════════════════════════════
+
+class TestCustomerSearch:
+    """搜索框模糊匹配：名称/网址/邮箱等字段片段命中"""
+
+    def _create(self, db: Session, **overrides) -> Customer:
+        data = {
+            "company_name": "Acme Tools Co., Ltd",
+            "website": "https://www.acme-tools.example.com",
+            "emails": json.dumps(["sales@acme-tools.example.com"], ensure_ascii=False),
+            "country": "Turkey",
+            "city": "Istanbul",
+            "discovery_source": "Manual Import",
+            "created_at": datetime.datetime.utcnow(),
+        }
+        data.update(overrides)
+        c = Customer(**data)
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        return c
+
+    def test_search_by_name_fragment(self):
+        db = TestSessionLocal()
+        self._create(db)
+        self._create(
+            db,
+            company_name="Beijing Machinery",
+            website="bj-machinery.example.com",
+            emails=json.dumps(["info@bj-machinery.example.com"], ensure_ascii=False),
+            country="China",
+            city="Beijing",
+        )
+        db.close()
+
+        resp = client.get("/api/customers?search=acme")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["customers"][0]["company_name"] == "Acme Tools Co., Ltd"
+
+    def test_search_case_insensitive(self):
+        db = TestSessionLocal()
+        self._create(db)
+        db.close()
+
+        for q in ("ACME", "Acme", "acme"):
+            resp = client.get(f"/api/customers?search={q}")
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["total"] == 1
+
+    def test_search_by_website_fragment(self):
+        db = TestSessionLocal()
+        self._create(db)
+        db.close()
+
+        resp = client.get("/api/customers?search=acme-tools.example.com")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    def test_search_by_email_fragment(self):
+        db = TestSessionLocal()
+        self._create(db)
+        db.close()
+
+        resp = client.get("/api/customers?search=sales@acme")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    def test_search_multi_keyword_and(self):
+        db = TestSessionLocal()
+        self._create(db)
+        db.close()
+
+        # 两个词都命中同一条记录
+        assert client.get("/api/customers?search=acme%20tools").json()["total"] == 1
+        # 两个词分别属于不存在/其它记录 → 不命中
+        assert client.get("/api/customers?search=acme%20beijing").json()["total"] == 0
+
+    def test_search_no_match(self):
+        db = TestSessionLocal()
+        self._create(db)
+        db.close()
+
+        resp = client.get("/api/customers?search=nonexistentxyz")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    def test_search_blank_ignored(self):
+        db = TestSessionLocal()
+        self._create(db)
+        db.close()
+
+        resp = client.get("/api/customers?search=%20%20")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+
+# ═══════════════════════════════════════════════
 # 统计数据 API
 # ═══════════════════════════════════════════════
 
