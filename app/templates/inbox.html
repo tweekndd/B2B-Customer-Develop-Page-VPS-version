@@ -13,36 +13,42 @@
 
 {% block content %}
 <!-- 顶部统计 -->
-<div class="row g-3 mb-4" id="statsRow">
-    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
-        <div class="stats-icon mb-2"><i class="bi bi-inbox" style="color: var(--warm-500); font-size: 1.6rem;"></i></div>
-        <div class="stats-number" id="statTotal" style="font-weight: 700;">-</div>
-        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">全部回复</div>
+<div class="row g-3 mb-4 stats-row" id="statsRow">
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card h-100" data-animate><div class="card-body">
+        <p class="card-title">全部回复</p>
+        <div class="stats-number" id="statTotal">-</div>
+        <div class="stat-trend"><i class="bi bi-inbox me-1"></i>收件箱汇总</div>
+        <span class="stat-chip chip-amber"><i class="bi bi-inbox"></i></span>
     </div></div></div>
-    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
-        <div class="stats-icon mb-2"><i class="bi bi-envelope-open" style="color: var(--accent-500); font-size: 1.6rem;"></i></div>
-        <div class="stats-number" id="statUnhandled" style="font-weight: 700;">-</div>
-        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">未处理</div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card h-100" data-animate data-delay="80"><div class="card-body">
+        <p class="card-title">未处理</p>
+        <div class="stats-number" id="statUnhandled">-</div>
+        <div class="stat-trend"><i class="bi bi-envelope-open me-1"></i>等待分类跟进</div>
+        <span class="stat-chip chip-blue"><i class="bi bi-envelope-open"></i></span>
     </div></div></div>
-    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
-        <div class="stats-icon mb-2"><i class="bi bi-lightning-charge" style="color: #c8962c; font-size: 1.6rem;"></i></div>
-        <div class="stats-number" id="statRfq" style="font-weight: 700;">-</div>
-        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">询价</div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card h-100" data-animate data-delay="160"><div class="card-body">
+        <p class="card-title">询价</p>
+        <div class="stats-number" id="statRfq">-</div>
+        <div class="stat-trend"><span class="up"><i class="bi bi-lightning-charge me-1"></i>高价值商机</span></div>
+        <span class="stat-chip chip-amber"><i class="bi bi-lightning-charge"></i></span>
     </div></div></div>
-    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
-        <div class="stats-icon mb-2"><i class="bi bi-list-check" style="color: var(--success); font-size: 1.6rem;"></i></div>
-        <div class="stats-number" id="statTodos" style="font-weight: 700;">-</div>
-        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">进行中待办</div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card h-100" data-animate data-delay="240"><div class="card-body">
+        <p class="card-title">待办</p>
+        <div class="stats-number" id="statTodos">-</div>
+        <div class="stat-trend"><i class="bi bi-list-check me-1"></i>进行中动作</div>
+        <span class="stat-chip chip-emerald"><i class="bi bi-list-check"></i></span>
     </div></div></div>
-    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
-        <div class="stats-icon mb-2"><i class="bi bi-slash-circle" style="color: #b02a2a; font-size: 1.6rem;"></i></div>
-        <div class="stats-number" id="statBounce" style="font-weight: 700;">-</div>
-        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">退信/退订</div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card h-100" data-animate data-delay="320"><div class="card-body">
+        <p class="card-title">退信/退订</p>
+        <div class="stats-number" id="statBounce">-</div>
+        <div class="stat-trend"><i class="bi bi-slash-circle me-1"></i>已自动拦截</div>
+        <span class="stat-chip chip-rose"><i class="bi bi-slash-circle"></i></span>
     </div></div></div>
-    <div class="col-md-2 col-6"><div class="card border-0 stats-card" data-animate><div class="card-body text-center py-3">
-        <div class="stats-icon mb-2"><i class="bi bi-person-check" style="color: var(--info-color); font-size: 1.6rem;"></i></div>
-        <div class="stats-number" id="statMatched" style="font-weight: 700;">-</div>
-        <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">已匹配客户</div>
+    <div class="col-md-2 col-6"><div class="card border-0 stats-card h-100" data-animate data-delay="400"><div class="card-body">
+        <p class="card-title">已匹配客户</p>
+        <div class="stats-number" id="statMatched">-</div>
+        <div class="stat-trend"><i class="bi bi-person-check me-1"></i>成功关联线索</div>
+        <span class="stat-chip chip-sky"><i class="bi bi-person-check"></i></span>
     </div></div></div>
 </div>
 

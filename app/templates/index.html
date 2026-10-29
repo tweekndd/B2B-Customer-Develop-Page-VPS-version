@@ -10,40 +10,44 @@
 
 {% block content %}
 <!-- 统计卡片 -->
-<div class="row g-3 mb-4" id="statsCards">
+<div class="row g-3 stats-row mb-4" id="statsCards">
     <div class="col-md-3 col-6" data-animate data-delay="100">
-        <div class="card stats-card border-0 h-100">
+        <div class="card stats-card h-100">
             <div class="card-body">
-                <div class="card-title"><i class="bi bi-buildings"></i>全部客户</div>
+                <p class="card-title">全部客户</p>
                 <div class="stats-number" id="statTotal">—</div>
-                <i class="bi bi-building stats-icon-bg"></i>
+                <div class="stat-trend"><i class="bi bi-database me-1"></i>客户池总量 · 全部数据来源</div>
+                <span class="stat-chip chip-blue"><i class="bi bi-buildings"></i></span>
             </div>
         </div>
     </div>
     <div class="col-md-3 col-6" data-animate data-delay="200">
-        <div class="card stats-card border-0 h-100">
+        <div class="card stats-card h-100">
             <div class="card-body">
-                <div class="card-title"><i class="bi bi-check-circle"></i>已分析</div>
+                <p class="card-title">已分析</p>
                 <div class="stats-number" id="statAnalyzed">—</div>
-                <i class="bi bi-check2-circle stats-icon-bg"></i>
+                <div class="stat-trend"><i class="bi bi-patch-check me-1"></i>AI 已完成官网分析</div>
+                <span class="stat-chip chip-emerald"><i class="bi bi-check2-circle"></i></span>
             </div>
         </div>
     </div>
     <div class="col-md-3 col-6" data-animate data-delay="300">
-        <div class="card stats-card border-0 h-100">
+        <div class="card stats-card h-100">
             <div class="card-body">
-                <div class="card-title"><i class="bi bi-google"></i>Google 发现</div>
+                <p class="card-title">搜索任务发现</p>
                 <div class="stats-number" id="statGoogle">—</div>
-                <i class="bi bi-globe stats-icon-bg"></i>
+                <div class="stat-trend"><i class="bi bi-globe-americas me-1"></i>来自客户发现任务</div>
+                <span class="stat-chip chip-sky"><i class="bi bi-globe"></i></span>
             </div>
         </div>
     </div>
     <div class="col-md-3 col-6" data-animate data-delay="400">
-        <div class="card stats-card border-0 h-100">
+        <div class="card stats-card h-100">
             <div class="card-body">
-                <div class="card-title"><i class="bi bi-trophy"></i>A 级客户</div>
+                <p class="card-title">A 级客户</p>
                 <div class="stats-number" id="statGradeA">—</div>
-                <i class="bi bi-award stats-icon-bg"></i>
+                <div class="stat-trend"><span class="up"><i class="bi bi-graph-up-arrow me-1"></i>评分 ≥ 80</span> · 优先跟进</div>
+                <span class="stat-chip chip-amber"><i class="bi bi-award"></i></span>
             </div>
         </div>
     </div>

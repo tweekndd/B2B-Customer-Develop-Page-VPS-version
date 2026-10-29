@@ -1,5 +1,43 @@
 # 更新日志
 
+## v6.4 UI 全面重设计（2026-10-29）
+
+### 🎨 设计语言：钴蓝品牌 × 白侧边栏 × 深黑蓝暗色
+
+按新 LOGO 与 Figma 参考稿（白侧边栏、大数字统计卡、彩色图标圆片、蓝色圆角滚动条）对全部页面做了一场零功能变更的 UI 重构，主题从旧 teal 绿全面换为钴蓝（Cobalt Blue）：
+
+- **主题色系** `app/static/css/style.css` 完全重写：品牌蓝 `#2563EB / #1D4ED8`（保留 `--accent-*` 变量名与 `--teal-500/600/700` 别名，JS 与业务代码零改动）；亮色模式 = 白色侧边栏 + 浅灰蓝底 `#F3F5FA`，暗色模式 = 深黑蓝 `#0a0f1c` 系
+- **品牌素材**：`LOGO.png` → `static/img/logo.png`、`带字LOGO.png` → `static/img/logo-text.png`；base.html 侧边栏 / login.html / filemanager.html 顶栏 / favicon 全部接入新 LOGO
+- **字体体系**：新增 Outfit（数字/标题显示体）+ JetBrains Mono（等宽）；正文保留 Inter；关键数字统一 `tabular-nums` 防抖动
+- **base.html**：侧边栏品牌区改为 LOGO 图标 + 「AI Customer Dev」；每个导航项加彩色图标圆片（`.nav-ico.ico-*`）；侧边栏底部重构为用户信息条 + 主题切换；页面切换 loader 重写为蓝色科技感 Orbit 动画（`.pt-overlay` + `pt-spin/pt-pulse`，支持 `prefers-reduced-motion` 自动降级），配合 `utils.js` 的 `navigate()` 过渡
+- **统计卡体系（Figma 同款）**：`stats-card` 改为大数字布局（🇺 SG Flag chips / 5-digit tabular 数字 / 描述性趋势行 / 右上彩色圆片 `.stat-chip.chip-*`），悬停渐变上滑；index / map / outreach / inbox / sync 五个页面的统计行全部升级为统一结构（**不再虚构趋势百分比，趋势行改为中性描述文案**）
+- **index.html / login.html 逐页重做**：首页操作栏、筛选栏、全局表格（表头表脚、行悬停、成绩徽章 A/B/C/D、来源/状态徽章、followup 跟进点）全部按新配色重排；登录页改为深黑蓝背景 + 蓝色辉光 + 玻璃拟态卡片 + LOGO
+- **按钮体系**：新增 `.btn-swap` 文字滑动动效（buttons.txt 方案）、悬停上浮阴影；`.btn-accent` / `.btn-accent-outline` 重制；所有链接/焦点环/选中态统一为蓝
+- **暗色模式兼容修补**：为 JS 动态生成的 Bootstrap 工具类补齐暗色覆盖（`bg-light`/`text-dark` 徽章、`alert-*`、`btn-close` 反色、`badge.bg-secondary` 等），暗色下不再出现白底黑字失真
+- **独立体系同步换蓝**：`filemanager.css` teal → 钴蓝，顶栏接入 LOGO；`.page-card` / `.page-card-header` / `.skeleton-loading` 等模板中已使用但从未定义的类补入 style.css
+- **完全向后兼容**：13 个 JS 文件依赖的全部类名/ID/变量名保留不动（`--accent-*`、grade-A/B/C/D、`badge-status.*`、`badge-source.*`、`followup-dot.*`、`.animated`、`.open`、`.d-none`、分页/搜索/筛选/导入弹窗等）；未运行页面的行为逻辑改动为 0
+
+**验证**：`pytest tests/` 全绿 **489 passed**；实测启动后 `/`、`/login`、全部静态资源 200 OK，登录重定向正常；浏览器逐页人工验证通过（含亮/暗双主题）。无数据库迁移、无新增依赖，直接替换文件即可生效。
+
+## v6.3 Robotics Lead Qualification（2026-09-23）
+
+### 🤖 行业切换：Robotics / Automation / AMR / AGV / Mobile Robot / Robotic Arm / Embodied AI
+
+将 B2B 客户开发系统扩展为机器人行业客户挖掘与 AI Lead Qualification 系统。第一阶段聚焦 **Singapore / Thailand**（Malaysia 次之）。全部改动向后兼容，未删除任何既有功能。
+
+- **Robotics 关键词体系** `app/services/robotics_keywords.json` + `robotics_keyword_generator.py`：Country × Customer Type × Application 组合生成多个 Google Query（9 大客户类型：Robotics SI / Automation SI / AMR·AGV Integrator / Distributor / Startup·AI / Warehouse·Logistics / Manufacturing / Inspection·Outdoor / Research）。搜索任务关键词填 `robotics`（或 `__robotics__`）即自动使用矩阵；`POST /api/discovery/generate-queries` 可预览，`GET /api/discovery/robotics-keywords` 返回矩阵。
+- **7 维 AI Lead Scoring（100 分）** `scoring_engine.py` V3.0：Product Fit 30 / Application Fit 20 / Customer Type 15 / Commercial Probability 15 / Technical Fit 10 / Geographic 5 / Credibility 5。优先采用 AI `score_breakdown`（按配置上限 clamp），AI 不可用时回退规则关键词匹配。
+- **AI 输出必须含证据** `glm_analyzer.py` V6.0：返回 `score_breakdown / evidence / recommended_products / likely_use_cases / sales_angle / negative_flags / confidence / recommended_action`，严格遵守「只依据网页内容、不臆造、区分客户/竞品/现有渠道」。
+- **排除逻辑**：直接竞争对手（KUKA/FANUC/ABB/Yaskawa/MiR/Geek+ 等）→ `negative_flag=DIRECT_COMPETITOR`，`lead_grade=EXCLUDE`；现有 AgileX 渠道（distributor/partner/reseller）→ `EXISTING_PARTNER`，`recommended_action=CHANNEL_PARTNER`，不进普通 Lead 池。
+- **Lead Classification**：A(80-100)/B(65-79)/C(50-64)/D(30-49)/EXCLUDE(0-29)。
+- **产品映射**：AMR/Warehouse→TRACER/SCOUT/Mobile Robot Chassis；Outdoor/Inspection→SCOUT/RANGER/BUNKER；Mobile Manipulation→NERO/PiPER；Embodied AI→NERO/PiPER/Teleoperation/Data Collection；Education/R&D→PiPER/NERO/LIMO；OEM/SI→Mobile Robot Chassis/OEM Platform。
+- **数据库**：`customers` / `analysis_runs` / `score_snapshots` 新增 7 维分数、`lead_grade`、`customer_type`、`industry`、`recommended_products`、`likely_use_cases`、`evidence`、`sales_angle`、`negative_flags`、`confidence`、`recommended_action` 等列（Alembic `004_robotics_lead` + SQLite 自动迁移，纯 ADD COLUMN）。
+- **默认配置**：`industry_config.json`（v3.0）、`country_weights.json`（Singapore/Thailand=5, Malaysia=4, Vietnam/Indonesia/Philippines=3, Other=1）更新为机器人行业；`similar_company_finder` 行业映射首项改为机器人/自动化。
+
+**验证**：`pytest tests/` 全绿 **488 passed**（重写 `test_scoring_engine.py` / `test_keyword_analyzer.py` 为机器人域，新增 7 维、排除逻辑、渠道伙伴用例）。
+
+---
+
 ## v6.2 Phase2（2026-09-08）
 
 ### 💬 回复同步与 AI 分类（方案 Phase2 · 回复中心闭环）

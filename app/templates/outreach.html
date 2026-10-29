@@ -10,40 +10,44 @@
 
 {% block content %}
 <!-- 顶部快捷状态 -->
-<div class="row g-3 mb-4" id="statsRow">
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-hourglass-split" style="color: var(--warm-500); font-size: 1.6rem;"></i></div>
-                <div class="stats-number" id="statPending" style="font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">待审批</div>
+<div class="row g-3 mb-4 stats-row" id="statsRow">
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate>
+            <div class="card-body">
+                <p class="card-title">待审批</p>
+                <div class="stats-number" id="statPending">-</div>
+                <div class="stat-trend"><i class="bi bi-hourglass-split me-1"></i>等待人工确认</div>
+                <span class="stat-chip chip-amber"><i class="bi bi-hourglass-split"></i></span>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-check2-circle" style="color: var(--success); font-size: 1.6rem;"></i></div>
-                <div class="stats-number" id="statSent" style="font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">今日已发</div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate data-delay="100">
+            <div class="card-body">
+                <p class="card-title">今日已发</p>
+                <div class="stats-number" id="statSent">-</div>
+                <div class="stat-trend"><span class="up"><i class="bi bi-send-check me-1"></i>外联已触达</span></div>
+                <span class="stat-chip chip-emerald"><i class="bi bi-check2-circle"></i></span>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-file-earmark-text" style="color: var(--accent-500); font-size: 1.6rem;"></i></div>
-                <div class="stats-number" id="statDrafts" style="font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">草稿</div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate data-delay="200">
+            <div class="card-body">
+                <p class="card-title">草稿</p>
+                <div class="stats-number" id="statDrafts">-</div>
+                <div class="stat-trend"><i class="bi bi-file-earmark-text me-1"></i>全部草稿池</div>
+                <span class="stat-chip chip-blue"><i class="bi bi-file-earmark-text"></i></span>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-list-check" style="color: var(--info-color); font-size: 1.6rem;"></i></div>
-                <div class="stats-number" id="statFailed" style="font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">发送失败/重试</div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate data-delay="300">
+            <div class="card-body">
+                <p class="card-title">发送失败/重试</p>
+                <div class="stats-number" id="statFailed">-</div>
+                <div class="stat-trend"><i class="bi bi-exclamation-triangle me-1"></i>需要人工介入</div>
+                <span class="stat-chip chip-violet"><i class="bi bi-list-check"></i></span>
             </div>
         </div>
     </div>

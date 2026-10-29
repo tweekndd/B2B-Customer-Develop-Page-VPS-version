@@ -10,40 +10,44 @@
 
 {% block content %}
 <!-- 状态总览卡片 -->
-<div class="row g-3 mb-4" id="statsOverview">
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-people-fill" style="color: var(--accent-500); font-size: 1.8rem;"></i></div>
-                <div class="stats-number" id="statCustomers" style="font-size: 1.6rem; font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">客户总数</div>
+<div class="row g-3 mb-4 stats-row" id="statsOverview">
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate>
+            <div class="card-body">
+                <p class="card-title">客户总数</p>
+                <div class="stats-number" id="statCustomers">-</div>
+                <div class="stat-trend"><i class="bi bi-people-fill me-1"></i>当前数据库</div>
+                <span class="stat-chip chip-blue"><i class="bi bi-people-fill"></i></span>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-check-circle-fill" style="color: var(--success); font-size: 1.8rem;"></i></div>
-                <div class="stats-number" id="statAnalyzed" style="font-size: 1.6rem; font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">已分析</div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate data-delay="100">
+            <div class="card-body">
+                <p class="card-title">已分析</p>
+                <div class="stats-number" id="statAnalyzed">-</div>
+                <div class="stat-trend"><span class="up"><i class="bi bi-check-circle me-1"></i>AI 就绪</span></div>
+                <span class="stat-chip chip-emerald"><i class="bi bi-check2-circle"></i></span>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-database" style="color: var(--warm-500); font-size: 1.8rem;"></i></div>
-                <div class="stats-number" id="statDbSize" style="font-size: 1.6rem; font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">数据库大小</div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate data-delay="200">
+            <div class="card-body">
+                <p class="card-title">数据库大小</p>
+                <div class="stats-number" id="statDbSize">-</div>
+                <div class="stat-trend"><i class="bi bi-database me-1"></i>本地存储占用</div>
+                <span class="stat-chip chip-amber"><i class="bi bi-database"></i></span>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 stats-card" data-animate>
-            <div class="card-body text-center py-3">
-                <div class="stats-icon mb-2"><i class="bi bi-archive" style="color: var(--info-color); font-size: 1.8rem;"></i></div>
-                <div class="stats-number" id="statBackups" style="font-size: 1.6rem; font-weight: 700;">-</div>
-                <div class="stats-label" style="font-size: 0.8rem; color: var(--text-secondary);">备份数</div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 stats-card h-100" data-animate data-delay="300">
+            <div class="card-body">
+                <p class="card-title">备份数</p>
+                <div class="stats-number" id="statBackups">-</div>
+                <div class="stat-trend"><i class="bi bi-archive me-1"></i>最近保留的快照</div>
+                <span class="stat-chip chip-sky"><i class="bi bi-archive"></i></span>
             </div>
         </div>
     </div>
@@ -152,7 +156,7 @@
 <!-- 备份列表 -->
 <div class="card border-0" data-animate>
     <div class="card-header" style="background: transparent; border-bottom: 1px solid var(--border-color); padding: 1rem 1.25rem;">
-        <h5 class="mb-0" style="font-weight: 600;"><i class="bi bi-archive me-2" style="color: var(--info-color);"></i>历史备份</h5>
+        <h5 class="mb-0" style="font-weight: 600;"><i class="bi bi-archive me-2" style="color: var(--accent-600);"></i>历史备份</h5>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
