@@ -56,7 +56,7 @@ class Customer(Base):
 
     # V6.0 新增：Robotics Lead Qualification 7 维评分与结构化输出
     industry = Column(String(100), nullable=True, comment="行业（AI识别）")
-    customer_type = Column(String(100), nullable=True, comment="客户类型（Robotics SI / AMR Integrator 等）")
+    customer_type = Column(String(100), nullable=True, comment="客户类型（Distributor / Importer / Trading Company / EPC Contractor 等）")
     product_fit_score = Column(Integer, nullable=True, comment="Product Fit 0-30")
     application_fit_score = Column(Integer, nullable=True, comment="Application Fit 0-20")
     customer_type_score = Column(Integer, nullable=True, comment="Customer Type 0-15")

@@ -266,26 +266,36 @@ Priority: A(≥80) > B(≥60) > C(≥40) > D
 
 **联动注意**：普通意图回复 → 客户状态「已发邮件」升「已回复」并创建待办；bounce/unsubscribe → 进黑名单 + 走状态机（因「无效线索」为 auto 终态，若客户已在更高状态则仅留痕等待人工确认）。Alembic：`003_phase2_inbox`（+5 表 + mail_sender_accounts 3 游标列）。AO tests：`tests/test_phase2_inbox.py`（monkeypatch `inbox_sync_service._connect_imap` + stub `reply_classifier.get_llm_manager`）。
 
-## Robotics Lead Qualification（V6.3）
+## Lead Qualification（全行业通用，V6.5）
 
-**目标行业**：Robotics / Automation / AMR / AGV / Mobile Robot / Robotic Arm / Embodied AI（参考 AgileX 松灵机器人这类开放式机器人平台）。第一阶段市场：Singapore、Thailand（Malaysia 次之）。
+**定位**：系统默认不绑定任何行业，通用识别「可能采购、分销、转售、集成我方产品/方案的 B2B 客户」（经销商 / 进口商 / 贸易商 / 批发商 / 终端采购方 / 承包商 / 集成商等）。机器人、水处理等只是「可通过配置注入」的行业之一，不是硬编码。
 
-### 关键词体系
+### 配置驱动（`industry_config.json` v4.0）
 
-- `app/services/robotics_keywords.json`：Country × Customer Type × Application 关键词矩阵（9 大客户类型）。
-- `app/services/robotics_keyword_generator.py`：`generate_robotics_queries(country, ...)` 组合生成多个 Google Query。
-- 使用方式：新建搜索任务时关键词填 `robotics`（哨兵，或 `__robotics__`），`keyword_expander.expand_keywords()` 自动改用矩阵生成 Query；或调用 `POST /api/discovery/generate-queries` / `GET /api/discovery/robotics-keywords` 预览。
+| 字段 | 作用 | 默认 |
+|---|---|---|
+| `product_keywords` | 我方产品/方案关键词：并入 Product Fit 规则评分，并注入 `glm_analyzer` 提示词 | `[]` |
+| `direct_competitors` | 竞品名单：网页命中即 `DIRECT_COMPETITOR` → `EXCLUDE` | `[]` |
+| `existing_partner_signals` | 现有渠道伙伴信号 → `EXISTING_PARTNER` / `CHANNEL_PARTNER` | `[]` |
+| `product_mapping` | 场景 → 产品映射（键名按 `/`、`,` 拆分匹配网页文本） | `{}` |
+
+以上均为可选，为空时系统完全不臆断行业、竞品或产品；填写后立即生效（`PUT /api/config` 自动清缓存，含 `glm_analyzer`）。
+
+### 关键词扩展
+
+- `app/services/keyword_expander.py`：行业无关的 AI 扩展；基础关键词为空时返回通用采购方角色词（distributor / importer / wholesaler / trading company 等）；LLM 失败回退基础关键词。
+- 已移除机器人专属矩阵（`robotics_keyword_generator.py` / `robotics_keywords.json`）及 `GET /api/discovery/robotics-keywords`、`POST /api/discovery/generate-queries` 端点。
 
 ### 7 维 Lead Scoring（100 分，`scoring_engine.calculate_scores`）
 
 | Dimension | Max | 说明 |
 |---|---:|---|
-| Product Fit | 30 | AMR/AGV/mobile robot/UGV/robotic arm/mobile manipulation/teleoperation/embodied AI 等 |
-| Application Fit | 20 | AMR/AGV deployment、autonomous inspection、warehouse robotics 等实际场景 |
-| Customer Type | 15 | SI/OEM/Distributor/Solution Provider=15；企业终端=12；科研=5 |
-| Commercial Probability | 15 | current project/deployment/procurement/turnkey/pilot 等 |
-| Technical Fit | 10 | ROS/ROS2/SLAM/LiDAR/Python/C++/autonomous navigation 等 |
-| Geographic Fit | 5 | Singapore/Thailand=5, Malaysia=4, Other=1 |
+| Product Fit | 30 | 与我方产品/方案相关的采购、分销、转售、集成或批量应用 |
+| Application Fit | 20 | 采购/应用/项目场景（经销网络、进口转售、工程供货、招标等） |
+| Customer Type | 15 | Distributor / Importer / Trading Company / Wholesaler / Dealer / EPC / System Integrator 等「为转售或项目而采购」主体最高；终端次之；媒体/招聘/咨询=0 |
+| Commercial Probability | 15 | RFQ/tender/bid/procurement/purchase order/distributor program 等商业信号 |
+| Technical / Business Fit | 10 | ISO/CE、质量管理、工程团队、OEM/ODM、售后、出口物流 |
+| Geographic Fit | 5 | AI `score_breakdown` 优先，否则按 `country_weights.json`（默认等权 `Other=3`） |
 | Credibility | 5 | 官网/案例/客户/认证/办公地点等证据 |
 
 - 优先采用 AI `score_breakdown`（按配置上限 clamp），AI 不可用时回退规则关键词匹配；`total_score` + `lead_grade`(A/B/C/D/EXCLUDE) + `recommended_action` 由后端确定。
@@ -293,27 +303,28 @@ Priority: A(≥80) > B(≥60) > C(≥40) > D
 
 ### AI 输出（`glm_analyzer`，必须含证据）
 
-结构化 JSON：`score_breakdown`、`evidence`（必填）、`recommended_products`、`likely_use_cases`、`sales_angle`、`negative_flags`、`confidence`、`recommended_action`，以及旧字段 `company_type`/`buyer_intent_score`/`is_price_inquiry`/`needs_identified`/`product_match` 等。硬性约束：只依据网页内容、不臆造、区分「提供方案」与「采购方案」、区分竞品/现有渠道/潜在客户。
+结构化 JSON：`score_breakdown`、`evidence`（必填）、`recommended_products`、`likely_use_cases`、`sales_angle`、`negative_flags`、`confidence`、`recommended_action`，以及旧字段 `company_type`/`buyer_intent_score`/`is_price_inquiry`/`needs_identified`/`product_match` 等。硬性约束：只依据网页内容、不臆造、区分「提供产品/方案」与「采购产品/方案」、经销商/贸易商不得因非终端用户降分、证据不足不下竞品/渠道结论。
 
-### 排除逻辑
+### 排除逻辑（可配置）
 
-- 直接竞争对手（KUKA/FANUC/ABB/Yaskawa/Universal Robots/MiR/Geek+/Hai Robotics/Hikrobot/OTTO Motors 等）→ `negative_flags=[DIRECT_COMPETITOR]`，`lead_grade=EXCLUDE`。
-- 现有 AgileX 渠道（distributor/authorized distributor/partner/reseller）→ `EXISTING_PARTNER`，`customer_type=EXISTING_CHANNEL`，`recommended_action=CHANNEL_PARTNER`，不进普通 Lead 池。
+- 竞品：仅当 `direct_competitors` 已配置且命中 → `DIRECT_COMPETITOR` → `lead_grade=EXCLUDE`。
+- 现有渠道：仅当 `existing_partner_signals` 已配置且命中 → `EXISTING_PARTNER`，`customer_type=EXISTING_CHANNEL`，`recommended_action=CHANNEL_PARTNER`，不进普通 Lead 池。
+- 默认排除类别（行业无关）：招聘/媒体/营销代理/泛咨询/纯软件/纯教育。
 
 ### 数据库
 
-- 新增列（`customers`/`analysis_runs`/`score_snapshots`）：7 维分数、`lead_grade`、`customer_type`、`industry`、`recommended_products`、`likely_use_cases`、`evidence`、`sales_angle`、`negative_flags`、`confidence`、`recommended_action`。
-- 迁移：`alembic upgrade head`（`004_robotics_lead`）；开发/单机 `DB_AUTO_CREATE=1` 走 `_migrate_add_column` 自动补列。
+- 列名与 V6.3 相同（`customers`/`analysis_runs`/`score_snapshots`）：7 维分数、`lead_grade`、`customer_type`、`industry`、`recommended_products`、`likely_use_cases`、`evidence`、`sales_angle`、`negative_flags`、`confidence`、`recommended_action`。列语义行业无关，无需新迁移。
+- 迁移：`alembic upgrade head`（`004_robotics_lead` 为历史 revision 名，保留不动）；开发/单机 `DB_AUTO_CREATE=1` 走 `_migrate_add_column` 自动补列。
 
 ### 配置
 
-- `app/services/industry_config.json`（v3.0）：7 维权重、产品关键词、竞争对手名单、现有渠道信号、产品映射、A/B/C/D/EXCLUDE 阈值。
-- `app/services/country_weights.json`：Singapore/Thailand=5、Malaysia=4、Vietnam/Indonesia/Philippines=3、Other=1。
+- `app/services/industry_config.json`（v4.0）：通用关键词、客户类型分数、可选 `product_keywords`/`direct_competitors`/`existing_partner_signals`/`product_mapping`、A/B/C/D/EXCLUDE 阈值。
+- `app/services/country_weights.json`：默认 `{"Other": 3}`（所有国家等权），可自行加国家覆盖。
 
 ### 运行与验证
 
 ```bash
 python main.py                       # 或 uvicorn main:app --reload
-# 新建搜索任务：country=Singapore, keyword=robotics  → 自动生成矩阵 Query
+# 新建搜索任务：country=Germany, keyword=industrial pumps  → 通用扩展（无需行业档案）
 pytest tests/                        # 488 passed
 ```

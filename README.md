@@ -186,12 +186,13 @@ alembic upgrade head    # 已部署 Phase0 的库
 | **官网抓取 V2** | 三阶段 URL 发现（33 条 HEAD 预检 + 智能链接发现 + 异步并发 GET），Jina AI Reader 免费降级兜底 |
 | **Reader 爬虫降级** | 三层降级统一使用免费的 r.jina.ai API，零成本无需 API Key。支持 JS 渲染兜底，可自托管 Docker 镜像 |
 | **邮箱提取** | 自动提取 info / sales / contact / procurement / project / marketing 前缀邮箱 |
-| **关键词分析** | 14 个正向 + 7 个负向行业关键词命中统计（从配置文件加载，可运行时编辑） |
+| **关键词分析** | 正向/负向关键词命中统计（通用采购方词表，从配置文件加载，可运行时编辑，不绑定行业） |
+| **全行业通用 V6.5** | 系统默认不绑定任何行业；`industry_config.json` 可选注入 `product_keywords`（我方产品/方案）、竞品名单、现有渠道信号、场景→产品映射，任何行业直接可用 |
 | **GLM AI 分析** | 识别公司类型、分析原因、生成开发切入点和推荐联系职位，支持模型自动降级 |
-| **买家/供应商分级 V4.6** | AI 买家意向评分(0-10)：供应商/制造商=低分，矿场/EPC/政府招标=高分，经销商/贸易商=高价值采购方（7-9） |
+| **买家/供应商分级 V4.6** | AI 买家意向评分(0-10)：同类产品制造商=低分，明确采购/招标/项目需求=高分，经销商/进口商/贸易商=高价值采购方（7-9），不因非终端用户降分 |
 | **多语种开发信 V4.6** | 产品关键词驱动的 AI 开发信自动生成，按国家自动检测语言（130+ 国家），一键复制/打开邮件客户端 |
 | **AI 与 API 设置页 V4.6** | 网页上配置 LLM/搜索引擎/邮箱 API Key（无需环境变量），多 Provider 支持 + 测试连接，Key 加密存储、按用户隔离、自动回退服务器默认 |
-| **规则评分引擎** | 5 个维度评分：行业匹配度(30) + 项目匹配度(25) + 公司类型(20) + 国家优先级(15) + 联系方式(10) + 价格询盘加成(5)，可运行时配置 |
+| **规则评分引擎** | 7 维 100 分制：产品匹配(30) + 应用场景(20) + 客户类型(15) + 采购可能性(15) + 技术/业务能力(10) + 地理匹配(5) + 可信度(5)，可运行时配置；AI 不可用时自动回退规则关键词 |
 | **Hunter 邮箱查找** | Hunter.io API，支持域名搜索、姓名精确查找、部门/级别筛选，5 层配额优化策略 |
 | **Tomba 邮箱查找** | Tomba.io API，返回数据更丰富（含领英、电话、部门、置信度评分），无结果不扣费 |
 | **Prospeo 邮箱发现** | Prospeo.io Search + Enrich API，瀑布流第 3 级，90 天内重复免费 |
@@ -405,9 +406,9 @@ cp .env.example .env
 ### 搜索发现客户
 
 1. 导航栏 → **客户发现**
-2. 填写国家（如 Saudi Arabia）、行业关键词（如 wastewater contractor）、搜索深度
+2. 填写国家（如 Germany）、关键词（任意行业，如 industrial pumps / packaging machine / solar inverter）、搜索深度
 3. 可选切换搜索引擎
-4. 点击 **Start Search** → 系统自动完成全流程
+4. 点击 **Start Search** → 系统自动完成全流程（关键词为空时会使用通用采购方角色词：distributor / importer / wholesaler / trading company 等）
 5. **客户列表** 页查看结果
 
 ### 客户详情页
@@ -768,7 +769,7 @@ AI-Trade-Customer-Analyzer/
 │   ├── static/js/                    # JS 模块（含 settings.js 设置页）
 │   ├── templates/                    # HTML 模板（含 settings.html / filemanager.html）
 │   └── filemanager.py                # VPS 文件管理器（仅管理员）
-└── tests/                            # 447 个测试用例
+└── tests/                            # 488 个测试用例
 ```
 
 ---
@@ -810,24 +811,43 @@ AI-Trade-Customer-Analyzer/
 
 ---
 
-## ⚙️ 评分系统说明
+## ⚙️ 评分系统说明（V6.5 全行业通用）
 
-规则评分引擎，AI 仅负责信息提取，评分由程序计算：
+规则评分引擎，AI 仅负责信息提取，评分由程序计算。系统**默认不绑定任何行业**，通用识别「可能采购、分销、转售、集成我方产品/方案的 B2B 客户」：
 
 | 维度 | 满分 | 说明 |
 |------|------|------|
-| 行业匹配度 | 30 | 官网命中行业关键词的数量和权重（可运行时编辑） |
-| 项目匹配度 | 25 | 是否有项目案例页面、是否涉足目标行业（标签可配置） |
-| 公司类型 | 20 | EPC=20, Contractor=18, Distributor=18, Dealer=17, Importer/Trader/End User/Mining=16-17, 生产商=8...（可编辑） |
-| 价格询盘加成 | +5 | 客户官网含采购询价意向时额外加分（`scoring.price_inquiry`，可编辑），总分封顶 100 |
-| 国家优先级 | 15 | 从 `country_weights.json` 读取（可编辑） |
-| 联系方式 | 10 | 1个=3分, 2个=5分, 3个=8分, 4个+=10分 |
+| 产品匹配 Product Fit | 30 | 与我方产品/方案相关的采购、分销、转售、集成或批量应用（配置 `product_keywords` 后自动并入判定） |
+| 应用场景 Application Fit | 20 | 采购/应用/项目场景：经销网络、进口转售、工程供货、招标采购、售后备件等 |
+| 客户类型 Customer Type | 15 | Distributor / Importer / Trading Company / Wholesaler / Dealer / EPC / System Integrator 等「为转售或项目而采购」主体最高；终端次之；媒体/招聘/咨询=0 |
+| 采购可能性 Commercial Probability | 15 | RFQ / tender / bid / procurement / purchase order / distributor program 等商业信号 |
+| 技术/业务能力 | 10 | ISO/CE 认证、质量管理、工程团队、OEM/ODM、售后、出口物流等 |
+| 地理匹配 Geographic Fit | 5 | 优先采用 AI 评分，否则按 `country_weights.json`（默认等权 `Other=3`） |
+| 可信度 Credibility | 5 | 官网/案例/客户/认证/办公地点等证据 |
 
-**优先级**：A(80-100) / B(60-79) / C(40-59) / D(0-39)
+**优先级**：A(80-100) / B(65-79) / C(50-64) / D(30-49) / EXCLUDE(0-29)
 
-**买家意向评分（V4.6）**：AI 同步输出 0-10 分（存于 `buyer_intent_score`，不并入总分）——供应商/制造商/电商页=低分，矿场/EPC/政府招标=高分，经销商/分销商/贸易商=高价值采购方（7-9 分），并标记 `is_price_inquiry`（价格询盘）。详情页与列表页以徽章展示。
+**AI 输出与证据**：AI 返回 `score_breakdown`（7 维明细）、`evidence`（必填证据）、`recommended_products`、`likely_use_cases`、`sales_angle`、`negative_flags`、`confidence`、`recommended_action`，严格只依据网页内容、不臆造。
 
-评分规则通过网页 **「评分配置」** 页面或编辑 `app/services/industry_config.json` 调整。切换行业（如水处理 → 光伏）仅需修改配置，无需改代码。
+**买家意向评分（V4.6）**：AI 同步输出 0-10 分（存于 `buyer_intent_score`，不并入总分）——同类产品制造商=低分，明确采购/招标/项目需求=高分，经销商/进口商/贸易商=高价值采购方（7-9 分），并标记 `is_price_inquiry`（价格询盘）。详情页与列表页以徽章展示。
+
+### 如何适配你自己的行业（无需改代码）
+
+编辑 `app/services/industry_config.json`（或网页 **「评分配置」** 页面），全部为可选配置：
+
+```json
+{
+    "product_keywords": ["industrial pump", "submersible pump"],
+    "direct_competitors": ["competitor-brand"],
+    "existing_partner_signals": ["your-brand authorized distributor"],
+    "product_mapping": {"Water Treatment": ["Pump A", "Pump B"]}
+}
+```
+
+- `product_keywords`：你的产品/方案关键词，会并入 Product Fit 规则评分并注入 AI 提示词；
+- `direct_competitors`：竞品名单，网页命中即 `EXCLUDE`；`existing_partner_signals`：现有渠道 → `CHANNEL_PARTNER`；
+- `product_mapping`：场景 → 产品映射（键名按 `/`、`,` 拆分匹配网页文本）；
+- 以上留空时，系统完全不臆断行业、竞品或产品。`country_weights.json` 默认 `{"Other": 3}`（所有国家等权），可自行覆盖。
 
 ---
 
@@ -844,7 +864,7 @@ AI-Trade-Customer-Analyzer/
 | **爬虫** | httpx + BeautifulSoup（异步并发）· Jina AI Reader 免费降级 |
 | **地图** | Leaflet.js + MarkerCluster + Nominatim |
 | **部署** | Docker · Docker Compose · Nginx · Let's Encrypt |
-| **测试** | pytest（447 测试用例：纯逻辑单元 + API 集成） |
+| **测试** | pytest（488 测试用例：纯逻辑单元 + API 集成） |
 | **缓存** | 本地 SQLite 多级缓存（搜索 / 官网 / AI 分析 / 邮箱 / 地理编码） |
 | **认证** | Session + bcrypt · 多用户 · 逐用户配额管控 |
 
@@ -854,7 +874,7 @@ AI-Trade-Customer-Analyzer/
 
 ```bash
 source venv/bin/activate
-pytest tests/ -v     # 447 测试，详细输出
+pytest tests/ -v     # 488 测试，详细输出
 pytest tests/ -q     # 简洁输出
 ```
 

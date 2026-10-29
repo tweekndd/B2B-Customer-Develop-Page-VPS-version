@@ -1,79 +1,67 @@
 {
-    "version": "3.0",
-    "industry": "robotics",
-    "description": "Robotics / Automation / AMR / AGV / Mobile Robot / Robotic Arm / Embodied AI 行业客户挖掘与 AI Lead Qualification 配置中心（可调整评分规则而无需修改代码）",
+    "version": "4.0",
+    "industry": "general",
+    "description": "全行业通用 B2B 客户挖掘与 AI Lead Qualification 配置中心。系统默认不绑定任何行业：识别「可能采购、分销、转售、集成我方产品/方案的 B2B 客户」（经销商/进口商/贸易商/终端采购方/承包商/集成商等）。所有关键词独立于行业，行业专属内容通过以下可选配置注入，无需改代码：(1) `product_keywords` 填入你的产品/方案关键词（会同步注入 AI 提示词与规则评分）；(2) `direct_competitors` 填入竞品名单（命中即排除）；(3) `existing_partner_signals` 填入现有渠道伙伴信号；(4) `product_mapping` 配置场景→产品映射。",
+
+    "product_keywords": [],
 
     "scoring": {
         "industry_match": {
             "max_score": 30,
             "keywords": {
-                "amr": 5,
-                "agv": 5,
-                "autonomous mobile robot": 5,
-                "mobile robot": 4,
-                "mobile robotics": 4,
-                "mobile robot chassis": 5,
-                "robot chassis": 4,
-                "ugv": 5,
-                "unmanned ground vehicle": 5,
-                "robotic arm": 5,
-                "robot arm": 4,
-                "cobot": 3,
-                "mobile manipulation": 5,
-                "teleoperation": 4,
-                "embodied ai": 5,
-                "robot learning": 4,
-                "robot data collection": 4,
-                "robotics development": 4,
-                "robotics platform": 4,
-                "robotics kit": 3,
-                "ros": 3,
-                "ros2": 3,
-                "slam": 3,
-                "autonomous navigation": 4,
-                "lidar": 2,
-                "robotics integration": 4,
-                "robotics engineering": 3,
-                "warehouse robotics": 4,
-                "warehouse automation": 3,
-                "logistics automation": 3,
-                "industrial automation": 2,
-                "factory automation": 2,
-                "smart factory": 2,
-                "machine vision": 2,
-                "robot inspection": 3,
-                "autonomous inspection": 4
+                "distributor": 5,
+                "distributorship": 5,
+                "exclusive agent": 5,
+                "sales agent": 4,
+                "importer": 5,
+                "wholesaler": 4,
+                "wholesale": 3,
+                "trading company": 5,
+                "trading": 3,
+                "dealer": 4,
+                "reseller": 4,
+                "retailer": 2,
+                "oem": 3,
+                "odm": 3,
+                "procurement": 4,
+                "purchasing": 3,
+                "sourcing": 3,
+                "supply": 2,
+                "equipment": 2,
+                "machinery": 2,
+                "industrial": 1,
+                "trade": 2,
+                "import export": 4
             }
         },
         "project_match": {
             "max_score": 20,
-            "detection_keywords": ["projects", "case studies", "case study", "references", "completed projects", "ongoing projects", "our projects", "deployments", "deployed", "pilot project", "proof of concept"],
-            "content_keywords": ["amr", "agv", "mobile robot", "robotic arm", "robot", "robotics", "automation", "inspection", "warehouse"],
+            "detection_keywords": ["projects", "case studies", "case study", "references", "completed projects", "ongoing projects", "our projects", "tenders", "tender", "proof of concept", "turnkey"],
+            "content_keywords": ["equipment supply", "machinery supply", "procurement", "distributor", "importer", "trading company", "tender", "bidding"],
             "has_project_base": 8,
             "has_content_match": 12,
             "low_relevance": 4,
-            "has_project_label": "存在机器人/自动化项目案例",
-            "has_content_label": "项目涉及机器人/自动化场景",
-            "low_relevance_label": "项目与机器人行业相关度低"
+            "has_project_label": "存在项目/案例页面",
+            "has_content_label": "项目涉及设备/贸易/采购场景",
+            "low_relevance_label": "项目与目标业务相关度低"
         },
         "company_type": {
             "max_score": 15,
             "types": {
-                "Robotics System Integrator": 15,
-                "Automation System Integrator": 15,
-                "Robotics OEM": 15,
-                "Mobile Robot OEM": 15,
-                "AMR/AGV Integrator": 15,
-                "Robotics Distributor": 15,
-                "Robotics Solution Provider": 15,
-                "Robotics Startup": 13,
-                "Embodied AI Company": 13,
-                "Enterprise End User": 12,
-                "Manufacturer": 8,
-                "Logistics/Warehouse Operator": 8,
-                "University/Research Lab": 5,
-                "Education Provider": 3,
-                "Recruitment/Media/Consulting": 0,
+                "Distributor": 15,
+                "Importer": 15,
+                "Trading Company": 14,
+                "Wholesaler": 14,
+                "Dealer": 14,
+                "Exclusive Agent / Sales Agent": 15,
+                "EPC Contractor": 13,
+                "System Integrator": 13,
+                "End User": 12,
+                "Retailer": 12,
+                "Contractor": 12,
+                "Manufacturer": 6,
+                "University/Research Lab": 3,
+                "Media/Consulting/Recruitment": 0,
                 "Direct Competitor": 0,
                 "Other": 0
             }
@@ -110,68 +98,72 @@
     "product_fit": {
         "max_score": 30,
         "strong_keywords": [
-            "amr", "agv", "autonomous mobile robot", "mobile robot", "mobile robotics",
-            "mobile robot chassis", "robot chassis", "ugv", "unmanned ground vehicle",
-            "robotic arm", "robot arm", "mobile manipulation", "teleoperation",
-            "embodied ai", "robot data collection", "robot learning",
-            "robotics development platform", "robotics oem", "robotics platform"
+            "distributor", "distributorship", "exclusive agent", "sales agent",
+            "importer", "wholesaler", "wholesale", "trading company", "dealer",
+            "reseller", "stockist", "procurement", "procure", "purchasing",
+            "buying", "sourcing", "we buy", "brands we carry"
         ],
         "mid_keywords": [
-            "robotics integration", "robotics system integration", "industrial automation",
-            "warehouse automation", "machine vision", "smart factory", "robotics engineering",
-            "automation system integrator", "robotics solution"
+            "supplier", "supply", "supplying", "product range", "product portfolio",
+            "our products", "our solutions", "catalog", "product catalogue",
+            "for sale", "in stock", "brands", "after-sales", "spare parts"
         ],
         "weak_keywords": [
-            "automation", "robot", "robotics", "cobot", "mechatronics", "sensor integration"
+            "products", "solutions", "equipment", "machinery", "services", "industrial"
         ],
         "action_verbs": [
-            "provide", "provides", "develop", "develops", "integrate", "integrates",
-            "manufacture", "manufactures", "deploy", "deploys", "build", "builds",
-            "offer", "offers", "solution", "solutions", "supply", "supplies", "design"
+            "provide", "provides", "supply", "supplies", "distribute", "distributes",
+            "import", "imports", "export", "exports", "sell", "sells", "offer",
+            "offers", "stock", "stocks", "source", "sources", "integrate",
+            "integrates", "purchase", "purchases"
         ]
     },
 
     "application_fit": {
         "max_score": 20,
         "strong_keywords": [
-            "amr deployment", "agv deployment", "autonomous inspection", "mobile manipulation",
-            "autonomous delivery", "warehouse robotics", "outdoor ugv", "robot data collection",
-            "embodied ai", "autonomous mobile robot", "amr", "agv"
+            "turnkey project", "turnkey solution", "epc", "project supply",
+            "tender", "tenders", "bid", "bidding", "procurement project",
+            "case studies", "success stories", "installations", "installed base",
+            "commissioning", "equipment supply", "ongoing projects"
         ],
         "mid_keywords": [
-            "logistics automation", "factory automation", "smart warehouse", "industrial inspection",
-            "automation project", "warehouse automation", "production line", "material handling",
-            "intralogistics"
+            "projects", "project", "case study", "references", "deployment",
+            "installation", "maintenance", "training", "after-sales service",
+            "spare parts", "after sales", "service center", "technical support"
         ],
         "weak_keywords": [
-            "automation", "robotic", "robot", "inspection", "manufacturing"
+            "services", "support", "application", "solutions", "engineering"
         ]
     },
 
     "commercial_probability": {
         "max_score": 15,
         "strong_keywords": [
-            "current project", "deployment", "deployed", "procurement", "system integration project",
-            "automation project", "robotics project", "customer deployment", "commercial solution",
-            "turnkey project", "turnkey solution", "pilot project", "proof of concept",
-            "request a quote", "rfq", "tender"
+            "request a quote", "get a quote", "rfq", "quote request", "request price",
+            "contact for price", "tender", "tenders", "bid", "bidding", "procurement",
+            "purchase order", "call for suppliers", "become a distributor",
+            "distributor opportunities", "dealer network", "channel partners",
+            "partner with us", "supplier portal", "request quotation"
         ],
         "mid_keywords": [
             "solution", "solutions", "customer", "customers", "project", "projects",
-            "implementation", "integration", "for sale", "distributor", "partner program"
+            "implementation", "distributor", "dealer", "partnership", "for sale",
+            "brands", "catalog", "trade inquiry", "business cooperation"
         ]
     },
 
     "technical_fit": {
         "max_score": 10,
         "keywords": [
-            "ros", "ros2", "robot operating system", "python", "c++", "slam",
-            "navigation", "autonomous navigation", "lidar", "computer vision",
-            "machine vision", "sensor integration", "embedded systems",
-            "mechanical engineering", "robotics engineering", "control system",
-            "ai", "artificial intelligence", "deep learning", "perception", "mapping"
+            "iso", "ce certified", "certified", "certification", "quality",
+            "quality control", "quality assurance", "qc", "qa", "engineer",
+            "engineering", "technical team", "after-sales service", "oem", "odm",
+            "export markets", "global markets", "warehousing", "logistics",
+            "testing", "rd", "research and development", "rd center",
+            "standardization", "compliance"
         ],
-        "strong_keywords": ["ros", "ros2", "slam", "autonomous navigation", "mobile manipulation", "robot operating system"]
+        "strong_keywords": ["iso", "oem", "odm", "quality control", "quality assurance", "after-sales service"]
     },
 
     "credibility": {
@@ -185,23 +177,9 @@
         ]
     },
 
-    "direct_competitors": [
-        "kuka", "fanuc", "abb robotics", "yaskawa", "universal robots", "mir",
-        "mobile industrial robots", "geek+", "hai robotics", "hikrobot",
-        "otto motors", "clearpath robotics", "husarion", "linorobot",
-        "turtlebot", "fetch robotics", "locus robotics", "6 river systems",
-        "invia robotics", "gideon brothers", "seegrid", "teradyne",
-        "siasun", "estun", "efort", "dobot", "aubo", "techman robot",
-        "onrobot", "robotiq", "franka emika", "kinova", "interbotix",
-        "trossen robotics", "dynamixel", "unitree", "boston dynamics",
-        "agility robotics", "anybotics", "exotec", "autoStore"
-    ],
+    "direct_competitors": [],
 
-    "existing_partner_signals": [
-        "agilex distributor", "agilex authorized distributor", "agilex partner",
-        "agilex reseller", "agilex robotics distributor", "authorized agilex",
-        "松灵机器人", "agilex"
-    ],
+    "existing_partner_signals": [],
 
     "exclusion_signals": [
         {"name": "recruitment", "keywords": ["recruitment", "staffing", "headhunter", "job board", "vacancy", "careers"]},
@@ -212,14 +190,7 @@
         {"name": "pure_education", "keywords": ["training center", "online course", "tuition", "bootcamp"]}
     ],
 
-    "product_mapping": {
-        "AMR / Warehouse": ["Mobile Robot Chassis", "TRACER", "SCOUT"],
-        "Outdoor / Inspection": ["SCOUT", "RANGER", "BUNKER", "Outdoor UGV"],
-        "Mobile Manipulation": ["NERO", "PiPER", "Mobile Manipulation Platform"],
-        "Embodied AI": ["NERO", "PiPER", "Universal Master Arm", "Teleoperation Platform", "Data Collection Platform"],
-        "Robotics Education / R&D": ["PiPER", "NERO", "LIMO", "SCOUT", "Development Kit"],
-        "OEM / Robotics SI": ["Mobile Robot Chassis", "Robotic Arm", "OEM Platform", "Customized Robotics Platform"]
-    },
+    "product_mapping": {},
 
     "priority_rules": {
         "A": {"min": 80, "max": 100},
@@ -238,13 +209,11 @@
     },
 
     "positive_keywords": [
-        "amr", "agv", "autonomous mobile robot", "mobile robot", "mobile robot chassis",
-        "ugv", "unmanned ground vehicle", "robotic arm", "robot arm", "mobile manipulation",
-        "teleoperation", "embodied ai", "robot learning", "robot data collection",
-        "robotics integration", "robotics system integrator", "warehouse robotics",
-        "warehouse automation", "logistics automation", "industrial automation",
-        "factory automation", "smart factory", "machine vision", "robot inspection",
-        "autonomous inspection", "robotics development", "robotics platform", "ros"
+        "distributor", "distributorship", "importer", "wholesaler", "wholesale",
+        "trading company", "dealer", "reseller", "stockist", "exclusive agent",
+        "procurement", "purchasing", "sourcing", "equipment", "machinery",
+        "solutions", "supplier", "oem", "odm", "import", "export",
+        "import export", "trading", "supply"
     ],
 
     "negative_keywords": [

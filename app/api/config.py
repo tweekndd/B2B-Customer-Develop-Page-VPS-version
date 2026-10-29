@@ -12,6 +12,7 @@ from app.auth import require_user, require_admin
 
 from app.services.scoring_engine import invalidate_config_cache
 from app.services.keyword_analyzer import invalidate_keyword_cache
+from app.services.glm_analyzer import invalidate_analyzer_config_cache
 
 router = APIRouter(tags=["config"])
 
@@ -193,6 +194,7 @@ def save_config(data: dict = Body(...), admin=Depends(require_admin)):
     # 清除所有缓存，使新配置即时生效
     invalidate_config_cache()
     invalidate_keyword_cache()
+    invalidate_analyzer_config_cache()
 
     return {"message": "配置已保存，新评分规则已生效"}
 

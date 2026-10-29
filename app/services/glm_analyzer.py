@@ -1,20 +1,24 @@
 """
-GLM AI分析服务（V6.0 — Robotics Lead Qualification）
+GLM AI分析服务（V6.5 — 全行业通用 Lead Qualification）
 
-调用统一 LLM 接口（app.llm.manager）分析客户官网文本，面向
-Robotics / Automation / AMR / AGV / Mobile Robot / Robotic Arm / Embodied AI 行业，
+调用统一 LLM 接口（app.llm.manager）分析客户官网文本，行业无关：
+识别「可能真实采购、分销、转售、集成我方产品/方案的 B2B 客户、渠道伙伴或项目伙伴」，
 输出结构化、可审计的 Lead Qualification 结果（含 7 维评分明细 + 证据）。
 
 设计原则（对应需求文档）：
-  - AI 判断的是「这家公司是否可能成为机器人平台产品的潜在商业客户/渠道/项目伙伴？」
+  - AI 判断的是「这家公司是否可能成为我方产品的潜在商业客户/渠道/项目伙伴？」
     而不是「这是不是一家好公司？」
   - 只依据网页真实内容判断，不得臆测客户/项目/产品/营收/采购行为
-  - 严格区分「提供解决方案的公司」与「可能采购解决方案的公司」
-  - 严格区分现有 AgileX 合作方 / 竞争对手 / 潜在客户
+  - 严格区分「提供产品/方案的公司」与「可能采购产品/方案的公司」——
+    经销商/进口商/贸易商属于「为转售而采购」的高价值客户，不得因非终端用户而降分
+  - 竞争对手 / 现有渠道伙伴仅当 industry_config.json 配置了对应名单或我方产品关键词时判断
   - 必须输出证据（evidence），不能只有一个分数
   - 证据不足时降低评分并显式说明
 """
+import json
 import logging
+import os
+from functools import lru_cache
 from typing import Optional, Dict, Any, List
 
 from app.llm.manager import get_llm_manager
@@ -22,86 +26,99 @@ from app.llm.utils import extract_json
 
 logger = logging.getLogger("glm_analyzer")
 
+_ANALYZER_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "industry_config.json")
+
+
+@lru_cache(maxsize=1)
+def _load_analyzer_config() -> dict:
+    """读取行业配置（拿 product_keywords 等可选字段），读取失败返回空 dict"""
+    try:
+        with open(_ANALYZER_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+
+
+def invalidate_analyzer_config_cache():
+    """配置写入后清除缓存（config API 保存时调用）"""
+    _load_analyzer_config.cache_clear()
+
+
 SYSTEM_PROMPT = (
-    "你是一位专注于 Robotics / Automation / AMR / AGV / Mobile Robot / Robotic Arm / "
-    "Embodied AI 行业的 B2B Lead Qualification 专家。"
-    "你的任务不是找『所有机器人公司』，而是找出『可能真实采购、集成、分销、部署或指定开放机器人平台"
-    "（如 AgileX 松灵机器人）的 B2B 客户、渠道伙伴或项目合作伙伴』。"
-    "必须严格区分：潜在客户 vs 竞争对手 vs 现有渠道。"
+    "你是一位全行业通用的 B2B Lead Qualification 专家。"
+    "你的任务不是找『所有相关公司』，而是找出『可能真实向我方采购、分销、转售、集成或"
+    "在项目中采用我方产品/方案的 B2B 客户、渠道伙伴或项目合作伙伴』。"
+    "必须严格区分：①「提供产品/方案的服务方」与「可能采购产品/方案的买家」——"
+    "制造商是同类产品的供应商而我们也是卖家时不加分；经销商/进口商/贸易商属于「为转售而采购」"
+    "的高价值客户，不得因非终端用户而降分。"
+    "必须在负面标记中区分：潜在客户 vs 同类产品制造商（竞争对手）vs 我方现有渠道。"
     "只依据所给网页内容判断，绝不臆造客户、项目、产品、营收或采购行为。"
     "每个重要评分都必须给出网页证据（evidence）。只返回JSON格式数据。"
 )
+
 
 
 def _build_prompt(website_text: str) -> str:
     """构建发送给AI的提示词，控制在5000字符以内"""
     truncated_text = (website_text or "")[:5000]
 
-    prompt = f"""请分析以下公司网页内容，判断这家公司是否可能成为 Robotics / AMR / AGV / mobile robot / robotic arm / mobile manipulation 平台类产品的潜在商业客户、渠道客户或项目合作伙伴，并返回严格的JSON（不要包含其他文字）：
+    prompt = f"""请分析以下公司网页内容，判断这家公司是否可能成为我方产品/方案的潜在商业客户、渠道客户或项目合作伙伴，并返回严格的JSON（不要包含其他文字）：
 
 网页内容：
 {truncated_text}
 
 【判断对象】
-目标产品参考 AgileX Robotics（松灵机器人）这类开放式机器人平台，包括：
-Mobile Robot Chassis、AMR/AGV Development Platform、UGV、Robotic Arm、Mobile Manipulation Platform、
-Teleoperation Platform、Embodied AI / Data Collection Platform、Robotics Development Kit、OEM Robotics Platform。
-不要把目标市场理解成传统 Industrial Robot（KUKA/FANUC/ABB/Yaskawa 等）。
+{_product_line_for_prompt()}
 
 【评分维度（总分100，必须给出 score_breakdown）】
-- product_fit (0-30)：网页是否明确出现 AMR/AGV/mobile robot/mobile robot chassis/UGV/robotic arm/
-  mobile manipulation/teleoperation/robot data collection/embodied AI/robotics development platform/robotics OEM，
-  且公司自己在提供、开发、集成或采购相关产品 → 25-30；
-  明确从事 robotics integration / industrial automation / warehouse automation / machine vision / smart factory / robotics engineering 但未明确目标产品 → 15-24；
-  泛自动化、证据较弱 → 5-14；与 robotics/automation 基本无关 → 0-4。
-- application_fit (0-20)：实际机器人应用场景（AMR/AGV deployment、autonomous inspection、mobile manipulation、
-  autonomous delivery、warehouse robotics、outdoor UGV、robot data collection、embodied AI）→ 18-20；
-  logistics/factory automation、smart warehouse、industrial inspection → 12-17；泛工业自动化 → 5-11；无 → 0-4。
-- customer_type (0-15)：Robotics System Integrator / Automation SI / Robotics OEM / Mobile Robot OEM /
-  Robotics Distributor / Robotics Solution Provider → 15；大型企业终端用户且有明确自动化项目 → 12；
-  中型制造/物流/仓储企业有自动化需求 → 8；University/Research Lab/Research Institute → 5；
-  普通教育机构 → 3；个人/媒体/招聘/咨询等无关主体 → 0。
-- commercial_probability (0-15)：出现 current project/deployment/procurement/system integration project/
-  automation project/robotics project/customer deployment/commercial solution/turnkey/pilot project → 13-15；
-  明确向商业客户销售机器人/自动化方案 → 9-12；技术能力明显但无采购/商业项目证据 → 5-8；
-  主要研究/咨询/教育/媒体 → 1-4；明显无 → 0。
-- technical_fit (0-10)：ROS/ROS2/Python/C++/SLAM/Navigation/LiDAR/Computer Vision/AI/Machine Vision/
-  Sensor Integration/Embedded Systems/Mechanical/Robotics Engineering/Autonomous Navigation 等。
-- geographic_fit (0-5)：Singapore=5, Thailand=5, Malaysia=4, Vietnam/Indonesia/Philippines=3, Other=1。
-- credibility (0-5)：依据官网/成立时间/规模/客户/项目/案例/认证/办公地点等证据。
+- product_fit (0-30)：网页是否明确出现与我方产品/方案直接相关的采购、分销、销售、应用业务，
+  且公司在自己做产品的采购、分销、转售、集成或批量应用 → 25-30；
+  明确从事相关产品的经销/进口/批发/集成/工程，证据充分但未指出具体型号层面 → 15-24；
+  有泛商业/泛贸易/泛工程信号，证据较弱 → 5-14；与我方产品/方案基本无交叉点 → 0-4。
+- application_fit (0-20)：存在明确的产品采购/应用/销售场景（经销网络、进口转售、
+  工程项目供货、招标采购、批量应用面、售后服务与备件体系）→ 16-20；
+  有项目/案例且业务与我方产品有可能的应用交叉 → 10-15；泛通用信号 → 5-9；无 → 0-4。
+- customer_type (0-15)：Distributor / Importer / Trading Company / Wholesaler / Dealer /
+  EPC Contractor / System Integrator / 系统集成商等「为转售或项目而采购」的主体 → 13-15；
+  大型企业终端用户且有明确采购需求 → 12；零售商/中型终端 → 8-11；
+  University/Research Lab → 3-5；媒体/招聘/咨询等无关主体 → 0。
+- commercial_probability (0-15)：出现 request quote/RFQ/tender/bid/procurement/purchase order/
+  become a distributor/dealer network/partner program/supplier portal/年度采购计划等真实商业信号 → 13-15；
+  明确向商业客户销售/采购相关产品 → 9-12；业务能力明显但无采购/商业项目证据 → 5-8；
+  主要为资讯/咨询/教育/个人主体 → 1-4；明显无 → 0。
+- technical_fit (0-10)：业务配套与交付能力（ISO/CE 认证、质量管理、工程团队、
+  OEM/ODM、售后服务体系、出口与物流、仓储供应能力等）。
+- geographic_fit (0-5)：目标市场对产品出口/销售的通用吸引力；无特殊优势信息时给 2-3。
+- credibility (0-5)：依据官网/成立时间/规模/客户/案例/认证/办公地点等证据。
 
 【负面/排除逻辑（negative_flags）】
-- 若确认是直接竞争对手（KUKA/FANUC/ABB/Yaskawa/Universal Robots/MiR/Geek+/Hai Robotics/Hikrobot/
-  OTTO Motors 等机器人平台制造商）→ negative_flags 加入 "DIRECT_COMPETITOR"，recommended_action="EXCLUDE"。
-- 若网页明确说明是 AgileX distributor/authorized distributor/partner/reseller → negative_flags 加入
-  "EXISTING_PARTNER"，recommended_action="CHANNEL_PARTNER"，customer_type="EXISTING_CHANNEL"。
-- 招聘/媒体/新闻/营销代理/泛咨询/个人网站/招聘板/纯软件/纯教育/完全无关制造商 → negative_flags 加入对应类别。
+- 若我方产品/方案已明确（见【判断对象】），且证据显示该公司本身制造同类产品、与我方形成直接竞争
+  → negative_flags 加入 "DIRECT_COMPETITOR"，recommended_action="EXCLUDE"。
+- 若证据显示该公司已是我方现有授权分销/经销/合作渠道 → negative_flags 加入 "EXISTING_PARTNER"，
+  recommended_action="CHANNEL_PARTNER"，customer_type="EXISTING_CHANNEL"。
+- 招聘/媒体/新闻/营销代理/泛咨询/个人网站/纯软件/纯教育/明显无关主体 → negative_flags 加入对应类别。
+- 若我方产品未明确，则不要臆断「同类产品制造商」，仅在证据非常明确时才加 DIRECT_COMPETITOR。
 
 【硬性要求】
 1. 只使用网页中真实出现的信息。
 2. 不得编造客户、项目、产品、营收或采购行为。
-3. 区分「公司提供解决方案」与「公司可能采购解决方案」。
-4. 区分现有 AgileX 合作方与潜在客户。
-5. 区分竞争对手与潜在客户。
+3. 区分「公司提供解决方案/产品」与「公司可能采购产品/方案」。
+4. 经销商/进口商/贸易商是高价值采购方（为转售而采购），不应因非终端用户而降分。
+5. 区分竞争对手、现有渠道与潜在客户；证据不足时不要下竞品/渠道结论。
 6. 证据不足时降低评分并明确写 "insufficient evidence"。
-7. 不要仅凭 "automation" 一词推断机器人需求。
-8. 不要把所有 robotic-arm 公司都当成潜在客户。
-9. 每个主要评分决策都要有 evidence。
-10. 返回结构化 JSON。
+7. 不要仅凭公司所属行业宽泛背景就判定需求，必须以采购/分销/应用的具体证据为准。
+8. 每个主要评分决策都要有 evidence。
+9. 返回结构化 JSON。
 
-【推荐产品映射（recommended_products，证据不足时返回空数组）】
-- AMR/Warehouse → Mobile Robot Chassis / TRACER / SCOUT
-- Outdoor/Inspection → SCOUT / RANGER / BUNKER / Outdoor UGV
-- Mobile Manipulation → NERO / PiPER / Mobile Manipulation Platform
-- Embodied AI → NERO / PiPER / Universal Master Arm / Teleoperation Platform / Data Collection Platform
-- Robotics Education/R&D → PiPER / NERO / LIMO / SCOUT / Development Kit
-- OEM/Robotics SI → Mobile Robot Chassis / Robotic Arm / OEM Platform / Customized Robotics Platform
+【推荐产品（recommended_products，证据不足或我方产品未明确时返回空数组）】
+- 仅当【判断对象】中给出了具体的我方产品/方案时，才从其中推荐最匹配该公司业务的产品；
+- 不要推荐清单之外的任何产品名称。
 
 请返回JSON，格式如下：
 {{
-    "company_type": "公司类型（Robotics System Integrator / Automation System Integrator / Robotics OEM / Mobile Robot OEM / AMR/AGV Integrator / Robotics Distributor / Robotics Solution Provider / Robotics Startup / Embodied AI Company / Enterprise End User / Manufacturer / Logistics/Warehouse Operator / University/Research Lab / Education Provider / Recruitment/Media/Consulting / Direct Competitor / Other）",
+    "company_type": "公司类型（Distributor / Importer / Trading Company / Wholesaler / Dealer / Exclusive Agent / EPC Contractor / System Integrator / End User / Retailer / Contractor / Manufacturer / University/Research Lab / Media/Consulting/Recruitment / Direct Competitor / EXISTING_CHANNEL / Other）",
     "customer_type": "同上，客户类型",
-    "industry": "所属行业（英文，如 Robotics / Industrial Automation / Warehouse Logistics 等）",
+    "industry": "所属行业（英文，尽量具体，如 Industrial Automation / Construction Machinery / Food & Beverage 等）",
     "total_score": 0,
     "score_breakdown": {{
         "product_fit": 0,
@@ -122,17 +139,33 @@ Teleoperation Platform、Embodied AI / Data Collection Platform、Robotics Devel
     "buyer_intent_score": 0,
     "buyer_intent_reason": "买家意向评分原因（中文，50字以内）",
     "is_price_inquiry": false,
-    "needs_identified": ["客户可能需要的产品/设备1"],
-    "product_match": "最匹配我们产品的具体产品名（英文，无则空字符串）",
+    "needs_identified": ["客户可能需要的产品/方案1"],
+    "product_match": "与我们产品最匹配的具体产品名（英文，无则空字符串）",
     "analysis_reason": "分析原因（中文，50字以内）",
     "sales_hook": "推荐开发切入点（中文，50字以内）",
     "target_position": "推荐联系职位（中文，如CEO / Procurement Manager / Project Manager）",
     "summary": "英文客户摘要，50字以内",
-    "identified_projects": "如果页面中有机器人/自动化项目案例信息，请提取描述（中文，100字以内），没有则返回空字符串",
+    "identified_projects": "如果页面中有项目/案例/采购信息，请提取描述（中文，100字以内），没有则返回空字符串",
     "address_city": "如果网页内容中包含公司地址/城市信息，提取城市名称（英文优先），没有则返回空字符串"
 }}"""
 
     return prompt
+
+
+def _product_line_for_prompt() -> str:
+    """构建【判断对象】段落"""
+    cfg = _load_analyzer_config()
+    kws = [str(k).strip() for k in (cfg.get("product_keywords") or []) if str(k).strip()]
+    if kws:
+        return (
+            "我方销售的产品/方案关键词如下（用自己的关键词判断客户匹配度，不要替换单一行业视角）：\n"
+            + "、".join(kws)
+        )
+    return (
+        "通用口径：未指定具体产品。判断该公司是否可能向我方采购、分销、转售、集成或在项目中采购产品/方案——"
+        "重点看其是否为经销商/进口商/贸易商/批发商/集成商/承包商等「为转售或项目而采购」的主体，"
+        "或存在明确的设备/产品采购需求。不要因为公司所属行业与某个特定行业不符而直接排除。"
+    )
 
 
 async def analyze_company(

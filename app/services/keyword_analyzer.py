@@ -9,15 +9,12 @@ from typing import Dict, List, Tuple
 from functools import lru_cache
 
 
-# V3.0 前向兼容：如果 industry_config.json 中未定义关键词，使用以下 Robotics 默认值
+# 全行业通用：如果 industry_config.json 中未定义关键词，使用以下通用 B2B 采购方关键词
 _FALLBACK_POSITIVE = [
-    "amr", "agv", "autonomous mobile robot", "mobile robot", "mobile robot chassis",
-    "ugv", "unmanned ground vehicle", "robotic arm", "robot arm", "mobile manipulation",
-    "teleoperation", "embodied ai", "robot learning", "robot data collection",
-    "robotics integration", "robotics system integrator", "warehouse robotics",
-    "warehouse automation", "logistics automation", "industrial automation",
-    "factory automation", "smart factory", "machine vision", "robot inspection",
-    "autonomous inspection", "robotics development", "robotics platform", "ros",
+    "distributor", "distributorship", "importer", "wholesaler", "trading company",
+    "dealer", "reseller", "stockist", "exclusive agent", "procurement",
+    "purchasing", "sourcing", "equipment", "machinery", "solutions",
+    "supplier", "oem", "odm", "import", "export", "trading", "supply",
 ]
 _FALLBACK_NEGATIVE = [
     "career", "job", "vacancy", "recruitment", "news", "blog", "school", "university",

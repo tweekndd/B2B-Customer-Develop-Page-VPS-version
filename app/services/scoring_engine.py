@@ -1,15 +1,18 @@
 """
-评分引擎（V3.0 — Robotics Lead Qualification）
+评分引擎（V4.0 — 全行业通用 Lead Qualification）
 
-面向 Robotics / Automation / AMR / AGV / Mobile Robot / Robotic Arm / Embodied AI 行业，
-对客户进行 7 维度 100 分制 AI Lead Scoring。
+行业无关：对客户进行 7 维度 100 分制 AI Lead Scoring。
+系统默认不绑定任何行业，行业专属内容通过 industry_config.json 的可选字段注入：
+  - product_keywords：我方产品/方案关键词（并入 Product Fit 规则评分）
+  - direct_competitors / existing_partner_signals：竞品与现有渠道名单（默认空）
+  - product_mapping：场景 → 产品映射（默认空）
 
 评分维度（与文档一致）：
     Product Fit                  30
     Application Fit              20
     Customer Type                15
     Commercial Purchase Prob.    15
-    Technical / Integration      10
+    Technical / Business Fit     10
     Geographic Fit                5
     Company Credibility           5
     --------------------------------
@@ -55,7 +58,7 @@ def _load_country_weights() -> Dict[str, int]:
         with open(config_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"Singapore": 5, "Thailand": 5, "Malaysia": 4, "Other": 1}
+        return {"Other": 3}
 
 
 # ═══════════════════════════════════════════
@@ -128,7 +131,7 @@ def _score_industry_match(website_text: str) -> Tuple[int, str]:
             hit_details.append(f"{keyword}(+{points})")
 
     total_score = min(total_score, max_score)
-    detail = "、".join(hit_details) if hit_details else "未命中行业关键词"
+    detail = "、".join(hit_details) if hit_details else "未命中目标关键词"
     return total_score, detail
 
 
@@ -244,18 +247,26 @@ def _score_price_inquiry(is_price_inquiry: bool) -> Tuple[int, str]:
 # ═══════════════════════════════════════════
 
 def _score_product_fit(website_text: str, ai_result: Optional[dict]) -> Tuple[int, str]:
-    """Product Fit — 30 分：公司是否存在与目标产品直接相关的需求"""
+    """Product Fit — 30 分：公司是否存在与目标产品/方案直接相关的采购/分销需求"""
     ai_val = _ai_dim(ai_result, ["product_fit", "product_fit_score"], 30)
     if ai_val is not None:
         return ai_val, f"AI评估 Product Fit({ai_val}/30)"
 
-    cfg = _load_config().get("product_fit", {})
+    cfg = dict(_load_config().get("product_fit", {}))
     max_score = cfg.get("max_score", 30)
     text = (website_text or "").lower()
     if not text:
         return 0, "无官网内容"
 
-    strong = _match_terms(text, cfg.get("strong_keywords", []))
+    # 将用户配置的「我方产品/方案关键词」并入强关键词，实现全行业可插拔
+    custom_products = [
+        str(k).strip().lower()
+        for k in (_load_config().get("product_keywords") or [])
+        if str(k).strip()
+    ]
+    strong_cfg = list(cfg.get("strong_keywords", []))
+
+    strong = _match_terms(text, strong_cfg + custom_products) if custom_products else _match_terms(text, strong_cfg)
     mid = _match_terms(text, cfg.get("mid_keywords", []))
     weak = _match_terms(text, cfg.get("weak_keywords", []))
     has_action = any(_term_present(text, v) for v in cfg.get("action_verbs", []))
@@ -275,12 +286,12 @@ def _score_product_fit(website_text: str, ai_result: Optional[dict]) -> Tuple[in
         score = 0
 
     score = min(score, max_score)
-    detail = f"命中目标产品关键词: {', '.join(strong or mid or weak[:3])}" if score else "未命中机器人产品关键词"
+    detail = f"命中产品/需求关键词: {', '.join(strong or mid or weak[:3])}" if score else "未命中目标产品/需求关键词"
     return score, detail
 
 
 def _score_application_fit(website_text: str, ai_result: Optional[dict]) -> Tuple[int, str]:
-    """Application Fit — 20 分：公司是否存在实际机器人应用场景"""
+    """Application Fit — 20 分：公司是否存在实际的采购/应用/项目场景"""
     ai_val = _ai_dim(ai_result, ["application_fit", "application_fit_score"], 20)
     if ai_val is not None:
         return ai_val, f"AI评估 Application Fit({ai_val}/20)"
@@ -309,7 +320,7 @@ def _score_application_fit(website_text: str, ai_result: Optional[dict]) -> Tupl
         score = 0
 
     score = min(score, max_score)
-    detail = f"命中机器人应用场景: {', '.join(strong or mid or weak[:3])}" if score else "未识别机器人应用场景"
+    detail = f"命中采购/应用场景: {', '.join(strong or mid or weak[:3])}" if score else "未识别采购/应用场景"
     return score, detail
 
 
@@ -389,7 +400,7 @@ def _score_commercial_probability(
 
 
 def _score_technical_fit(website_text: str, ai_result: Optional[dict]) -> Tuple[int, str]:
-    """Technical / Integration Capability — 10 分"""
+    """Technical / Business Capability — 10 分"""
     ai_val = _ai_dim(ai_result, ["technical_fit", "technical_fit_score", "technical"], 10)
     if ai_val is not None:
         return ai_val, f"AI评估技术集成能力({ai_val}/10)"
@@ -416,7 +427,7 @@ def _score_technical_fit(website_text: str, ai_result: Optional[dict]) -> Tuple[
         score = 0
 
     score = min(score, max_score)
-    detail = f"技术关键词: {', '.join(hits[:5])}" if hits else "未识别机器人技术能力"
+    detail = f"技术/业务关键词: {', '.join(hits[:5])}" if hits else "未识别技术/业务能力"
     return score, detail
 
 
@@ -472,7 +483,7 @@ def _detect_negative_flags(
     if customer_type and "competitor" in customer_type.lower():
         flags.append("DIRECT_COMPETITOR")
 
-    # 3. 现有 AgileX 渠道 / 合作方
+    # 3. 现有渠道 / 合作方（若配置了 existing_partner_signals，默认空）
     for sig in cfg.get("existing_partner_signals", []):
         if _term_present(text, sig):
             flags.append(f"EXISTING_PARTNER: {sig}")
@@ -502,7 +513,7 @@ def _detect_negative_flags(
 def _classify_lead(total_score: int, override: Optional[str]) -> str:
     """Lead Classification：A / B / C / D / EXCLUDE
 
-    override 为 EXCLUDE（竞争对手）或 EXISTING_CHANNEL（现有 AgileX 渠道）时，
+    override 为 EXCLUDE（竞争对手）或 EXISTING_CHANNEL（现有渠道伙伴）时，
     均不进入普通 Lead 池 → 返回 EXCLUDE（渠道伙伴由 recommended_action 区分）。
     """
     if override:
@@ -529,7 +540,7 @@ def _recommended_action(lead_grade: str, override: Optional[str]) -> str:
 
 
 def _recommend_products(website_text: str, customer_type: str, ai_result: Optional[dict]) -> List[str]:
-    """根据网页证据推荐产品方向（证据不足则返回 []）"""
+    """根据网页证据推荐产品方向（未配置我方产品/映射时返回 []）"""
     if ai_result and isinstance(ai_result.get("recommended_products"), list):
         products = [str(p).strip() for p in ai_result["recommended_products"] if str(p).strip()]
         if products:
@@ -539,29 +550,28 @@ def _recommend_products(website_text: str, customer_type: str, ai_result: Option
     if not text:
         return []
 
-    mapping = _load_config().get("product_mapping", {})
-    ct = (customer_type or "").lower()
+    config = _load_config()
 
-    if any(_term_present(text, t) for t in ["embodied ai", "robot learning", "teleoperation", "data collection"]):
-        bucket = "Embodied AI"
-    elif any(_term_present(text, t) for t in ["mobile manipulation", "manipulation platform"]):
-        bucket = "Mobile Manipulation"
-    elif any(_term_present(text, t) for t in ["inspection", "ugv", "outdoor", "patrol"]):
-        bucket = "Outdoor / Inspection"
-    elif any(_term_present(text, t) for t in ["amr", "agv", "warehouse", "logistics", "intralogistics"]):
-        bucket = "AMR / Warehouse"
-    elif "university" in ct or "research" in ct or "lab" in ct or any(_term_present(text, t) for t in ["university", "research lab", "laboratory"]):
-        bucket = "Robotics Education / R&D"
-    elif any(k in ct for k in ["integrator", "oem", "distributor", "solution provider"]):
-        bucket = "OEM / Robotics SI"
-    else:
-        return []
+    # 1) 命中我方产品关键词 → 直接作为推荐产品（product_keywords 常即产品/方案名）
+    custom_products = [
+        str(k).strip() for k in (config.get("product_keywords") or []) if str(k).strip()
+    ]
+    hits = [p for p in custom_products if _term_present(text, p)]
+    if hits:
+        return hits[:5]
 
-    return list(mapping.get(bucket, []))
+    # 2) 场景 → 产品映射（键名按 /、, 拆分为匹配词，默认空映射时跳过）
+    mapping = config.get("product_mapping") or {}
+    for bucket, products in mapping.items():
+        bucket_terms = [t.strip() for t in re.split(r"[/,、|]+", str(bucket)) if t.strip()]
+        if bucket_terms and any(_term_present(text, t) for t in bucket_terms):
+            return [str(p).strip() for p in products if str(p).strip()]
+
+    return []
 
 
 def _likely_use_cases(website_text: str, ai_result: Optional[dict]) -> List[str]:
-    """推断可能的使用场景（优先 AI）"""
+    """推断可能的使用场景（优先 AI，其次通用 B2B 采购场景）"""
     if ai_result and isinstance(ai_result.get("likely_use_cases"), list):
         cases = [str(c).strip() for c in ai_result["likely_use_cases"] if str(c).strip()]
         if cases:
@@ -569,12 +579,12 @@ def _likely_use_cases(website_text: str, ai_result: Optional[dict]) -> List[str]
 
     text = (website_text or "").lower()
     mapping = [
-        ("AMR integration", ["amr", "agv", "mobile robot"]),
-        ("warehouse automation", ["warehouse", "logistics", "intralogistics", "material handling"]),
-        ("industrial inspection", ["inspection", "patrol", "inspect"]),
-        ("mobile manipulation", ["mobile manipulation", "robotic arm", "manipulator"]),
-        ("outdoor / UGV", ["ugv", "outdoor", "unmanned ground"]),
-        ("embodied AI / data collection", ["embodied ai", "robot learning", "data collection", "teleoperation"]),
+        ("distribution / reselling", ["distributor", "distributorship", "reseller", "dealer", "wholesaler", "distribution"]),
+        ("import / export trade", ["importer", "import", "export", "trading company", "trading"]),
+        ("project supply / EPC", ["epc", "contractor", "turnkey", "project supply", "tender", "bidding"]),
+        ("system integration", ["system integrator", "system integration", "integration"]),
+        ("procurement / sourcing", ["procurement", "purchasing", "sourcing", "supplier portal"]),
+        ("after-sales & service", ["after-sales", "after sales", "spare parts", "maintenance", "service center"]),
     ]
     cases = [name for name, terms in mapping if any(_term_present(text, t) for t in terms)]
     return cases
@@ -632,7 +642,11 @@ def calculate_scores(
     customer_type_score, customer_type_detail, customer_type = _score_customer_type(company_type, ai_result)
     commercial_score, commercial_detail = _score_commercial_probability(text, ai_result, is_price_inquiry)
     technical_score, technical_detail = _score_technical_fit(text, ai_result)
-    geographic_score, geographic_detail = _score_country(country)
+    geographic_ai = _ai_dim(ai_result, ["geographic_fit", "geographic", "country_fit"], 5)
+    if geographic_ai is not None:
+        geographic_score, geographic_detail = geographic_ai, f"AI评估地理匹配({geographic_ai}/5)"
+    else:
+        geographic_score, geographic_detail = _score_country(country)
     credibility_score, credibility_detail = _score_credibility(text, ai_result)
 
     total_score = (

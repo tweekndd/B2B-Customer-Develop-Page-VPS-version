@@ -1,5 +1,23 @@
 # 更新日志
 
+## v6.5 全行业通用化（2026-10-29）
+
+### 🌐 从「机器人行业专用」改为「全行业通用」
+
+将 V6.3 为机器人行业定制的 Lead Qualification 层改为**行业无关**：系统默认不绑定任何行业，通用识别「可能采购、分销、转售、集成我方产品/方案的 B2B 客户」（经销商 / 进口商 / 贸易商 / 批发商 / 终端采购方 / 承包商 / 集成商等）。机器人、水处理、包装机械等任何行业都通过**配置**注入，而非硬编码。全部改动向后兼容：数据库列、API 字段、7 维评分结构、A/B/C/D/EXCLUDE 分级均保持不变。
+
+- **AI 提示词通用化** `glm_analyzer.py`：SYSTEM_PROMPT 与评分细则去掉全部特定行业与品牌绑定，改为通用 B2B 买家判定；明确「制造商是供应商不加分、经销商/进口商/贸易商为转售而采购属于高价值客户，不得因非终端用户降分」；`recommended_products` 仅在配置了具体产品关键词时才推荐。
+- **配置驱动注入** `industry_config.json`（v4.0，`industry: general`）：新增 `product_keywords`（我方产品/方案关键词，并入 Product Fit 规则评分 + 注入 AI 提示词）；`direct_competitors` / `existing_partner_signals` / `product_mapping` 改为**可选、默认空**——为空时系统不臆断竞品/渠道/产品。评分配置改为通用采购方语言（distributor/importer/trading company/procurement/tender/ISO 等），公司类型改为 Distributor/Importer/Trading Company/Wholesaler/Dealer/EPC Contractor/System Integrator/End User…。`PUT /api/config` 保存后同步清除 `glm_analyzer` 配置缓存，即时生效。
+- **关键词扩展通用化** `keyword_expander.py`：删除 `robotics`/`__robotics__`/`机器人` 哨兵与机器人矩阵回退；基础关键词为空时返回通用采购方角色词（distributor / importer / wholesaler / trading company / dealer / procurement company），LLM 失败回退基础关键词；AI 扩展提示词去掉行业限定。
+- **移除机器人专属模块**：删除 `app/services/robotics_keywords.json`、`app/services/robotics_keyword_generator.py`；移除 `GET /api/discovery/robotics-keywords`、`POST /api/discovery/generate-queries` 两个端点（`/api/discovery/expand-keywords` 已覆盖该能力）。
+- **评分引擎清理** `scoring_engine.py`：`_recommend_products` 改为「AI 优先 → 命中 `product_keywords` 直接返回 → `product_mapping` 桶名匹配」，默认空映射返回 `[]`；`_likely_use_cases` 改为通用 B2B 采购场景；`Product Fit` 规则评分自动并入 `product_keywords`；AI `geographic_fit` 参与总分（此前仅用国家权重）；除去机器人文案/注释。
+- **国家权重中性化** `country_weights.json`：默认 `{"Other": 3}`（所有国家等权），可自行追加国家覆盖；`_load_country_weights` 回退同步。
+- **关键词回退中性化** `keyword_analyzer.py`：回退正向词改为通用采购方词表。
+- **前端**：AI 分析按钮/结果卡图标 `bi-robot` → `bi-stars`（仅图标，无业务文案）。
+- **测试**：重写 `tests/test_scoring_engine.py` / `tests/test_keyword_analyzer.py` 为通用域，新增「配置 `product_keywords` 后行业专属词可命中」「默认配置不臆断竞品/渠道」「配置竞品/渠道后排除生效」用例。
+
+**验证**：`pytest tests/` 全绿 **488 passed**；`import main` 启动冒烟通过；无数据库迁移、无新增依赖，直接替换文件即可生效。若想恢复某行业能力，只需在 `industry_config.json` 填 `product_keywords`（及可选竞品/渠道/产品映射），无需改代码。
+
 ## v6.4 UI 全面重设计（2026-10-29）
 
 ### 🎨 设计语言：钴蓝品牌 × 白侧边栏 × 深黑蓝暗色

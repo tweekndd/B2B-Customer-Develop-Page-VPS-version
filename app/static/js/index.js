@@ -96,7 +96,7 @@ function renderTable(data) {
                     <a href="/customer/${c.id}" target="_blank" class="btn btn-icon btn-outline-primary" title="查看详情"><i class="bi bi-eye"></i></a>
                     <button class="btn btn-icon btn-outline-success" onclick="analyzeSingle(${c.id})" title="分析"><i class="bi bi-lightning"></i></button>
                     <button class="btn btn-icon btn-outline-warning" onclick="rescrapeCustomer(${c.id})" title="重新抓取"><i class="bi bi-arrow-clockwise"></i></button>
-                    <button class="btn btn-icon btn-outline-info" onclick="reanalyzeCustomer(${c.id})" title="重新AI分析"><i class="bi bi-robot"></i></button>
+                    <button class="btn btn-icon btn-outline-info" onclick="reanalyzeCustomer(${c.id})" title="重新AI分析"><i class="bi bi-stars"></i></button>
                     <button class="btn btn-icon btn-outline-danger" onclick="deleteCustomer(${c.id})" title="删除"><i class="bi bi-trash"></i></button>
                 </div>
             </td>

@@ -53,35 +53,6 @@ async def api_expand_keywords(
 
 
 # ═══════════════════════════════════════════
-# Robotics 关键词矩阵（V6.0）
-# ═══════════════════════════════════════════
-
-@router.get("/discovery/robotics-keywords")
-def api_robotics_keywords(user=Depends(require_user)):
-    """返回 Robotics 关键词矩阵（国家 × 客户类型 × 关键词），供前端展示。"""
-    from app.services.robotics_keyword_generator import get_keyword_matrix
-    return get_keyword_matrix()
-
-
-@router.post("/discovery/generate-queries")
-def api_generate_robotics_queries(
-    country: str = Query(..., description="目标国家（Singapore/Thailand/Malaysia）"),
-    customer_types: Optional[str] = Query(None, description="客户类型，逗号分隔；不传则使用默认组合"),
-    max_queries: int = Query(50, ge=1, le=200, description="最多返回的 Query 数"),
-    user=Depends(require_user),
-):
-    """根据 Country × Customer Type × Application 生成多个 Google 搜索 Query。
-
-    注意：在「新建搜索任务」中直接把关键词填为 `robotics` 或 `__robotics__`，
-    系统会自动使用该矩阵（无需逐个创建任务）。
-    """
-    from app.services.robotics_keyword_generator import generate_robotics_queries
-    types = [t.strip() for t in customer_types.split(",") if t.strip()] if customer_types else None
-    queries = generate_robotics_queries(country, customer_types=types, max_queries=max_queries)
-    return {"country": country, "count": len(queries), "queries": queries}
-
-
-# ═══════════════════════════════════════════
 # 搜索引擎切换（V3.2 新增）
 # ═══════════════════════════════════════════
 
