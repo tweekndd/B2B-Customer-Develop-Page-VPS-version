@@ -47,6 +47,10 @@ def _ensure_indexes(engine):
         "idx_customers_filter_combo": "CREATE INDEX IF NOT EXISTS idx_customers_filter_combo ON customers(country, priority, status)",
         "idx_customers_score_sort": "CREATE INDEX IF NOT EXISTS idx_customers_score_sort ON customers(total_score DESC, id)",
         "idx_customers_created_sort": "CREATE INDEX IF NOT EXISTS idx_customers_created_sort ON customers(created_at, id)",
+        # V6.0 Robotics Lead Qualification
+        "idx_customers_lead_grade": "CREATE INDEX IF NOT EXISTS idx_customers_lead_grade ON customers(lead_grade)",
+        "idx_customers_customer_type": "CREATE INDEX IF NOT EXISTS idx_customers_customer_type ON customers(customer_type)",
+        "idx_customers_filter_combo_v6": "CREATE INDEX IF NOT EXISTS idx_customers_filter_combo_v6 ON customers(country, lead_grade)",
     }
     with engine.connect() as conn:
         for name, ddl in indexes.items():
@@ -173,6 +177,54 @@ def init_db():
     _migrate_add_column(engine, "customers", "email_draft", "TEXT")
     # V5.2 新增：最近发信时间（Gmail 发信检测自动回填）
     _migrate_add_column(engine, "customers", "last_email_sent_at", "DATETIME")
+    # V6.0 新增：Robotics Lead Qualification 7 维评分与结构化输出
+    _migrate_add_column(engine, "customers", "industry", "VARCHAR(100)")
+    _migrate_add_column(engine, "customers", "customer_type", "VARCHAR(100)")
+    _migrate_add_column(engine, "customers", "product_fit_score", "INTEGER")
+    _migrate_add_column(engine, "customers", "application_fit_score", "INTEGER")
+    _migrate_add_column(engine, "customers", "customer_type_score", "INTEGER")
+    _migrate_add_column(engine, "customers", "commercial_probability_score", "INTEGER")
+    _migrate_add_column(engine, "customers", "technical_fit_score", "INTEGER")
+    _migrate_add_column(engine, "customers", "geographic_score", "INTEGER")
+    _migrate_add_column(engine, "customers", "credibility_score", "INTEGER")
+    _migrate_add_column(engine, "customers", "lead_grade", "VARCHAR(10)")
+    _migrate_add_column(engine, "customers", "recommended_products", "TEXT")
+    _migrate_add_column(engine, "customers", "likely_use_cases", "TEXT")
+    _migrate_add_column(engine, "customers", "evidence", "TEXT")
+    _migrate_add_column(engine, "customers", "sales_angle", "TEXT")
+    _migrate_add_column(engine, "customers", "negative_flags", "TEXT")
+    _migrate_add_column(engine, "customers", "confidence", "FLOAT")
+    _migrate_add_column(engine, "customers", "recommended_action", "VARCHAR(30)")
+    # V6.0 分析运行表：新增 Lead Qualification 字段
+    _migrate_add_column(engine, "analysis_runs", "customer_type", "VARCHAR(100)")
+    _migrate_add_column(engine, "analysis_runs", "industry", "VARCHAR(100)")
+    _migrate_add_column(engine, "analysis_runs", "total_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "lead_grade", "VARCHAR(10)")
+    _migrate_add_column(engine, "analysis_runs", "recommended_action", "VARCHAR(30)")
+    _migrate_add_column(engine, "analysis_runs", "product_fit_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "application_fit_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "customer_type_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "commercial_probability_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "technical_fit_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "geographic_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "credibility_score", "INTEGER")
+    _migrate_add_column(engine, "analysis_runs", "recommended_products", "TEXT")
+    _migrate_add_column(engine, "analysis_runs", "likely_use_cases", "TEXT")
+    _migrate_add_column(engine, "analysis_runs", "evidence", "TEXT")
+    _migrate_add_column(engine, "analysis_runs", "sales_angle", "TEXT")
+    _migrate_add_column(engine, "analysis_runs", "negative_flags", "TEXT")
+    _migrate_add_column(engine, "analysis_runs", "confidence", "FLOAT")
+    # V6.0 评分快照表：新增 7 维字段
+    _migrate_add_column(engine, "score_snapshots", "product_fit_score", "INTEGER")
+    _migrate_add_column(engine, "score_snapshots", "application_fit_score", "INTEGER")
+    _migrate_add_column(engine, "score_snapshots", "customer_type_score", "INTEGER")
+    _migrate_add_column(engine, "score_snapshots", "commercial_probability_score", "INTEGER")
+    _migrate_add_column(engine, "score_snapshots", "technical_fit_score", "INTEGER")
+    _migrate_add_column(engine, "score_snapshots", "geographic_score", "INTEGER")
+    _migrate_add_column(engine, "score_snapshots", "credibility_score", "INTEGER")
+    _migrate_add_column(engine, "score_snapshots", "lead_grade", "VARCHAR(10)")
+    _migrate_add_column(engine, "score_snapshots", "recommended_action", "VARCHAR(30)")
+    _migrate_add_column(engine, "score_snapshots", "negative_flags", "TEXT")
     # 搜索任务表字段
     _migrate_add_column(engine, "search_tasks", "task_log", "TEXT")
     # Round 3 新增：搜索任务关联用户

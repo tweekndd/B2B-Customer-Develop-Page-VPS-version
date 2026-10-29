@@ -9,15 +9,19 @@ from typing import Dict, List, Tuple
 from functools import lru_cache
 
 
-# V2.8 前向兼容：如果 industry_config.json 中未定义关键词，使用以下默认值
+# V3.0 前向兼容：如果 industry_config.json 中未定义关键词，使用以下 Robotics 默认值
 _FALLBACK_POSITIVE = [
-    "wastewater", "water treatment", "sewage", "effluent",
-    "biogas", "anaerobic", "digester", "tank", "storage tank",
-    "reservoir", "municipal water", "desalination", "irrigation",
-    "industrial water",
+    "amr", "agv", "autonomous mobile robot", "mobile robot", "mobile robot chassis",
+    "ugv", "unmanned ground vehicle", "robotic arm", "robot arm", "mobile manipulation",
+    "teleoperation", "embodied ai", "robot learning", "robot data collection",
+    "robotics integration", "robotics system integrator", "warehouse robotics",
+    "warehouse automation", "logistics automation", "industrial automation",
+    "factory automation", "smart factory", "machine vision", "robot inspection",
+    "autonomous inspection", "robotics development", "robotics platform", "ros",
 ]
 _FALLBACK_NEGATIVE = [
-    "career", "job", "vacancy", "news", "blog", "school", "university",
+    "career", "job", "vacancy", "recruitment", "news", "blog", "school", "university",
+    "course", "tuition", "stock price", "dividend",
 ]
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "industry_config.json")

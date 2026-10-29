@@ -1,58 +1,85 @@
 {
-    "version": "2.0",
-    "description": "行业配置中心，调整评分规则无需修改代码",
+    "version": "3.0",
+    "industry": "robotics",
+    "description": "Robotics / Automation / AMR / AGV / Mobile Robot / Robotic Arm / Embodied AI 行业客户挖掘与 AI Lead Qualification 配置中心（可调整评分规则而无需修改代码）",
 
     "scoring": {
         "industry_match": {
             "max_score": 30,
             "keywords": {
-                "wastewater": 5,
-                "water treatment": 4,
-                "sewage": 5,
-                "effluent": 4,
-                "biogas": 5,
-                "anaerobic digestion": 5,
-                "digester": 4,
-                "sludge": 3,
-                "municipal water": 4,
-                "desalination": 4,
-                "irrigation": 3
+                "amr": 5,
+                "agv": 5,
+                "autonomous mobile robot": 5,
+                "mobile robot": 4,
+                "mobile robotics": 4,
+                "mobile robot chassis": 5,
+                "robot chassis": 4,
+                "ugv": 5,
+                "unmanned ground vehicle": 5,
+                "robotic arm": 5,
+                "robot arm": 4,
+                "cobot": 3,
+                "mobile manipulation": 5,
+                "teleoperation": 4,
+                "embodied ai": 5,
+                "robot learning": 4,
+                "robot data collection": 4,
+                "robotics development": 4,
+                "robotics platform": 4,
+                "robotics kit": 3,
+                "ros": 3,
+                "ros2": 3,
+                "slam": 3,
+                "autonomous navigation": 4,
+                "lidar": 2,
+                "robotics integration": 4,
+                "robotics engineering": 3,
+                "warehouse robotics": 4,
+                "warehouse automation": 3,
+                "logistics automation": 3,
+                "industrial automation": 2,
+                "factory automation": 2,
+                "smart factory": 2,
+                "machine vision": 2,
+                "robot inspection": 3,
+                "autonomous inspection": 4
             }
         },
         "project_match": {
-            "max_score": 25,
-            "detection_keywords": ["projects", "case studies", "case study", "references", "completed projects", "ongoing projects", "our projects"],
-            "content_keywords": ["wastewater", "water treatment", "biogas"],
-            "has_project_base": 10,
-            "has_content_match": 15,
-            "low_relevance": 5,
-            "has_project_label": "存在项目案例页面",
-            "has_content_label": "项目涉足目标行业",
-            "low_relevance_label": "项目与目标行业相关度低"
+            "max_score": 20,
+            "detection_keywords": ["projects", "case studies", "case study", "references", "completed projects", "ongoing projects", "our projects", "deployments", "deployed", "pilot project", "proof of concept"],
+            "content_keywords": ["amr", "agv", "mobile robot", "robotic arm", "robot", "robotics", "automation", "inspection", "warehouse"],
+            "has_project_base": 8,
+            "has_content_match": 12,
+            "low_relevance": 4,
+            "has_project_label": "存在机器人/自动化项目案例",
+            "has_content_label": "项目涉及机器人/自动化场景",
+            "low_relevance_label": "项目与机器人行业相关度低"
         },
         "company_type": {
-            "max_score": 20,
+            "max_score": 15,
             "types": {
-                "EPC": 20,
-                "Contractor": 18,
-                "Water Treatment Company": 18,
-                "Distributor": 18,
-                "Dealer": 17,
-                "Importer": 17,
-                "Trader": 16,
-                "End User": 16,
-                "Mining Company": 16,
+                "Robotics System Integrator": 15,
+                "Automation System Integrator": 15,
+                "Robotics OEM": 15,
+                "Mobile Robot OEM": 15,
+                "AMR/AGV Integrator": 15,
+                "Robotics Distributor": 15,
+                "Robotics Solution Provider": 15,
+                "Robotics Startup": 13,
+                "Embodied AI Company": 13,
+                "Enterprise End User": 12,
                 "Manufacturer": 8,
-                "Consultant": 6,
+                "Logistics/Warehouse Operator": 8,
+                "University/Research Lab": 5,
+                "Education Provider": 3,
+                "Recruitment/Media/Consulting": 0,
+                "Direct Competitor": 0,
                 "Other": 0
             }
         },
-        "price_inquiry": {
-            "max_score": 5,
-            "bonus": 5
-        },
         "country": {
-            "max_score": 15,
+            "max_score": 5,
             "weights_file": "country_weights.json"
         },
         "contact": {
@@ -64,24 +91,164 @@
                 {"min_emails": 3, "score": 8},
                 {"min_emails": 4, "score": 10}
             ]
+        },
+        "price_inquiry": {
+            "max_score": 5,
+            "bonus": 5
+        },
+        "lead_dimensions": {
+            "product_fit": 30,
+            "application_fit": 20,
+            "customer_type": 15,
+            "commercial_probability": 15,
+            "technical_fit": 10,
+            "geographic": 5,
+            "credibility": 5
         }
+    },
+
+    "product_fit": {
+        "max_score": 30,
+        "strong_keywords": [
+            "amr", "agv", "autonomous mobile robot", "mobile robot", "mobile robotics",
+            "mobile robot chassis", "robot chassis", "ugv", "unmanned ground vehicle",
+            "robotic arm", "robot arm", "mobile manipulation", "teleoperation",
+            "embodied ai", "robot data collection", "robot learning",
+            "robotics development platform", "robotics oem", "robotics platform"
+        ],
+        "mid_keywords": [
+            "robotics integration", "robotics system integration", "industrial automation",
+            "warehouse automation", "machine vision", "smart factory", "robotics engineering",
+            "automation system integrator", "robotics solution"
+        ],
+        "weak_keywords": [
+            "automation", "robot", "robotics", "cobot", "mechatronics", "sensor integration"
+        ],
+        "action_verbs": [
+            "provide", "provides", "develop", "develops", "integrate", "integrates",
+            "manufacture", "manufactures", "deploy", "deploys", "build", "builds",
+            "offer", "offers", "solution", "solutions", "supply", "supplies", "design"
+        ]
+    },
+
+    "application_fit": {
+        "max_score": 20,
+        "strong_keywords": [
+            "amr deployment", "agv deployment", "autonomous inspection", "mobile manipulation",
+            "autonomous delivery", "warehouse robotics", "outdoor ugv", "robot data collection",
+            "embodied ai", "autonomous mobile robot", "amr", "agv"
+        ],
+        "mid_keywords": [
+            "logistics automation", "factory automation", "smart warehouse", "industrial inspection",
+            "automation project", "warehouse automation", "production line", "material handling",
+            "intralogistics"
+        ],
+        "weak_keywords": [
+            "automation", "robotic", "robot", "inspection", "manufacturing"
+        ]
+    },
+
+    "commercial_probability": {
+        "max_score": 15,
+        "strong_keywords": [
+            "current project", "deployment", "deployed", "procurement", "system integration project",
+            "automation project", "robotics project", "customer deployment", "commercial solution",
+            "turnkey project", "turnkey solution", "pilot project", "proof of concept",
+            "request a quote", "rfq", "tender"
+        ],
+        "mid_keywords": [
+            "solution", "solutions", "customer", "customers", "project", "projects",
+            "implementation", "integration", "for sale", "distributor", "partner program"
+        ]
+    },
+
+    "technical_fit": {
+        "max_score": 10,
+        "keywords": [
+            "ros", "ros2", "robot operating system", "python", "c++", "slam",
+            "navigation", "autonomous navigation", "lidar", "computer vision",
+            "machine vision", "sensor integration", "embedded systems",
+            "mechanical engineering", "robotics engineering", "control system",
+            "ai", "artificial intelligence", "deep learning", "perception", "mapping"
+        ],
+        "strong_keywords": ["ros", "ros2", "slam", "autonomous navigation", "mobile manipulation", "robot operating system"]
+    },
+
+    "credibility": {
+        "max_score": 5,
+        "signals": [
+            {"name": "contact", "keywords": ["contact us", "contact", "phone", "telephone", "email", "address", "located in"], "score": 1},
+            {"name": "cases", "keywords": ["case studies", "case study", "customers", "clients", "success story", "testimonial", "references"], "score": 1},
+            {"name": "certifications", "keywords": ["iso", "certified", "certification", "partner", "award", "accreditation"], "score": 1},
+            {"name": "about", "keywords": ["about us", "our team", "founded", "established", "company profile", "since 19", "since 20", "years of experience"], "score": 1},
+            {"name": "physical_office", "keywords": ["headquarters", "head office", "our office", "facility", "address", "location"], "score": 1}
+        ]
+    },
+
+    "direct_competitors": [
+        "kuka", "fanuc", "abb robotics", "yaskawa", "universal robots", "mir",
+        "mobile industrial robots", "geek+", "hai robotics", "hikrobot",
+        "otto motors", "clearpath robotics", "husarion", "linorobot",
+        "turtlebot", "fetch robotics", "locus robotics", "6 river systems",
+        "invia robotics", "gideon brothers", "seegrid", "teradyne",
+        "siasun", "estun", "efort", "dobot", "aubo", "techman robot",
+        "onrobot", "robotiq", "franka emika", "kinova", "interbotix",
+        "trossen robotics", "dynamixel", "unitree", "boston dynamics",
+        "agility robotics", "anybotics", "exotec", "autoStore"
+    ],
+
+    "existing_partner_signals": [
+        "agilex distributor", "agilex authorized distributor", "agilex partner",
+        "agilex reseller", "agilex robotics distributor", "authorized agilex",
+        "松灵机器人", "agilex"
+    ],
+
+    "exclusion_signals": [
+        {"name": "recruitment", "keywords": ["recruitment", "staffing", "headhunter", "job board", "vacancy", "careers"]},
+        {"name": "media", "keywords": ["news website", "news portal", "media company", "magazine", "press release"]},
+        {"name": "marketing_agency", "keywords": ["marketing agency", "digital marketing", "seo agency", "advertising agency"]},
+        {"name": "generic_consulting", "keywords": ["management consulting", "business consulting", "strategy consulting"]},
+        {"name": "pure_software", "keywords": ["saas platform", "software as a service", "mobile app development", "web development"]},
+        {"name": "pure_education", "keywords": ["training center", "online course", "tuition", "bootcamp"]}
+    ],
+
+    "product_mapping": {
+        "AMR / Warehouse": ["Mobile Robot Chassis", "TRACER", "SCOUT"],
+        "Outdoor / Inspection": ["SCOUT", "RANGER", "BUNKER", "Outdoor UGV"],
+        "Mobile Manipulation": ["NERO", "PiPER", "Mobile Manipulation Platform"],
+        "Embodied AI": ["NERO", "PiPER", "Universal Master Arm", "Teleoperation Platform", "Data Collection Platform"],
+        "Robotics Education / R&D": ["PiPER", "NERO", "LIMO", "SCOUT", "Development Kit"],
+        "OEM / Robotics SI": ["Mobile Robot Chassis", "Robotic Arm", "OEM Platform", "Customized Robotics Platform"]
     },
 
     "priority_rules": {
         "A": {"min": 80, "max": 100},
-        "B": {"min": 60, "max": 79},
-        "C": {"min": 40, "max": 59},
-        "D": {"min": 0, "max": 39}
+        "B": {"min": 65, "max": 79},
+        "C": {"min": 50, "max": 64},
+        "D": {"min": 30, "max": 49},
+        "EXCLUDE": {"min": 0, "max": 29}
+    },
+
+    "recommended_action_rules": {
+        "A": "CONTACT",
+        "B": "CONTACT",
+        "C": "RESEARCH_MORE",
+        "D": "RESEARCH_MORE",
+        "EXCLUDE": "EXCLUDE"
     },
 
     "positive_keywords": [
-        "wastewater", "water treatment", "sewage", "effluent",
-        "biogas", "anaerobic", "digester", "tank", "storage tank",
-        "reservoir", "municipal water", "desalination", "irrigation",
-        "industrial water"
+        "amr", "agv", "autonomous mobile robot", "mobile robot", "mobile robot chassis",
+        "ugv", "unmanned ground vehicle", "robotic arm", "robot arm", "mobile manipulation",
+        "teleoperation", "embodied ai", "robot learning", "robot data collection",
+        "robotics integration", "robotics system integrator", "warehouse robotics",
+        "warehouse automation", "logistics automation", "industrial automation",
+        "factory automation", "smart factory", "machine vision", "robot inspection",
+        "autonomous inspection", "robotics development", "robotics platform", "ros"
     ],
 
     "negative_keywords": [
-        "career", "job", "vacancy", "news", "blog", "school", "university"
+        "career", "job", "vacancy", "recruitment", "news", "blog", "school", "university",
+        "course", "tuition", "stock price", "dividend"
     ]
 }

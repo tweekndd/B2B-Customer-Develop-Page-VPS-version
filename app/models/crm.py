@@ -54,6 +54,25 @@ class Customer(Base):
     # V5.2 新增：最近发信时间（Gmail 发信检测自动回填）
     last_email_sent_at = Column(DateTime, nullable=True, index=True, comment="最近发信时间（Gmail 检测到发信后自动更新）")
 
+    # V6.0 新增：Robotics Lead Qualification 7 维评分与结构化输出
+    industry = Column(String(100), nullable=True, comment="行业（AI识别）")
+    customer_type = Column(String(100), nullable=True, comment="客户类型（Robotics SI / AMR Integrator 等）")
+    product_fit_score = Column(Integer, nullable=True, comment="Product Fit 0-30")
+    application_fit_score = Column(Integer, nullable=True, comment="Application Fit 0-20")
+    customer_type_score = Column(Integer, nullable=True, comment="Customer Type 0-15")
+    commercial_probability_score = Column(Integer, nullable=True, comment="Commercial Purchase Probability 0-15")
+    technical_fit_score = Column(Integer, nullable=True, comment="Technical / Integration Capability 0-10")
+    geographic_score = Column(Integer, nullable=True, comment="Geographic Fit 0-5")
+    credibility_score = Column(Integer, nullable=True, comment="Company Credibility 0-5")
+    lead_grade = Column(String(10), nullable=True, index=True, comment="Lead Grade: A/B/C/D/EXCLUDE")
+    recommended_products = Column(Text, nullable=True, comment="推荐产品方向（JSON数组）")
+    likely_use_cases = Column(Text, nullable=True, comment="可能应用场景（JSON数组）")
+    evidence = Column(Text, nullable=True, comment="AI 评分证据（JSON数组）")
+    sales_angle = Column(Text, nullable=True, comment="推荐开发切入点（英文/中文）")
+    negative_flags = Column(Text, nullable=True, comment="负面/排除标记（JSON数组）")
+    confidence = Column(Float, nullable=True, comment="AI 置信度 0-1")
+    recommended_action = Column(String(30), nullable=True, comment="推荐动作: CONTACT/RESEARCH_MORE/CHANNEL_PARTNER/EXISTING_PARTNER/EXCLUDE")
+
     # V2.2 新增：抓取/分析状态（用于失败可视化）
     scrape_status = Column(String(20), nullable=True, comment="官网抓取状态: success/failed/partial/skipped")
     ai_status = Column(String(20), nullable=True, comment="AI分析状态: success/failed/skipped")

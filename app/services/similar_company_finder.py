@@ -31,8 +31,9 @@ _VERIFY_SSL = os.environ.get("SCRAPE_VERIFY_SSL", "").lower() == "true"
 
 # ── 行业分类映射 ──
 INDUSTRY_KEYWORDS = {
-    "水处理设备": ["water treatment", "wastewater", "sewage", "filtration", "purification",
-                  "desalination", "reverse osmosis", "RO", "ultrafiltration", " membrane"],
+    "机器人/自动化": ["amr", "agv", "autonomous mobile robot", "mobile robot", "mobile robot chassis",
+                   "ugv", "robotic arm", "mobile manipulation", "teleoperation", "embodied ai",
+                   "robot learning", "robotics integration", "warehouse robotics", "autonomous inspection"],
     "包装机械": ["packaging machine", "packaging equipment", "filling machine",
                 "sealing machine", "wrapping machine", "packaging line"],
     "光伏设备": ["solar panel", "photovoltaic", "solar energy", "PV module",

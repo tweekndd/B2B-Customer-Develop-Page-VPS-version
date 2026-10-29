@@ -13,6 +13,16 @@ from sqlalchemy.orm import Session
 from app.database import AnalysisRun, Customer, ScoreSnapshot, WebsiteSnapshot
 
 
+def _safe_int(value) -> Optional[int]:
+    """安全转换为 int（失败返回 None）"""
+    if value is None:
+        return None
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
 # ═══════════════════════════════════════════
 # 官网快照
 # ═══════════════════════════════════════════
@@ -108,6 +118,34 @@ def save_analysis_run(
         except (TypeError, ValueError):
             pass
         run.is_price_inquiry = 1 if ai_result.get("is_price_inquiry") else 0
+        # V6.0 Robotics Lead Qualification 字段
+        run.customer_type = str(ai_result.get("customer_type") or "")[:100] or None
+        run.industry = str(ai_result.get("industry") or "")[:100] or None
+        run.lead_grade = str(ai_result.get("lead_grade") or "")[:10] or None
+        run.recommended_action = str(ai_result.get("recommended_action") or "")[:30] or None
+        run.sales_angle = str(ai_result.get("sales_angle") or "")[:2000] or run.sales_angle
+        run.recommended_products = json.dumps(
+            ai_result.get("recommended_products") or [], ensure_ascii=False
+        )
+        run.likely_use_cases = json.dumps(
+            ai_result.get("likely_use_cases") or [], ensure_ascii=False
+        )
+        run.evidence = json.dumps(ai_result.get("evidence") or [], ensure_ascii=False)
+        run.negative_flags = json.dumps(ai_result.get("negative_flags") or [], ensure_ascii=False)
+        breakdown = ai_result.get("score_breakdown") or {}
+        run.total_score = _safe_int(ai_result.get("total_score"))
+        run.product_fit_score = _safe_int(breakdown.get("product_fit"))
+        run.application_fit_score = _safe_int(breakdown.get("application_fit"))
+        run.customer_type_score = _safe_int(breakdown.get("customer_type"))
+        run.commercial_probability_score = _safe_int(breakdown.get("commercial_probability"))
+        run.technical_fit_score = _safe_int(breakdown.get("technical_fit"))
+        run.geographic_score = _safe_int(breakdown.get("geographic_fit"))
+        run.credibility_score = _safe_int(breakdown.get("credibility"))
+        try:
+            if ai_result.get("confidence") is not None:
+                run.confidence = max(0.0, min(1.0, float(ai_result["confidence"])))
+        except (TypeError, ValueError):
+            pass
         run.raw_json = json.dumps(ai_result, ensure_ascii=False)
     db.add(run)
     db.flush()
@@ -189,6 +227,17 @@ def save_score_snapshot(
         contact_score=scores.get("contact_score"),
         total_score=scores.get("total_score"),
         priority=scores.get("priority"),
+        # V6.0 Robotics 7 维快照
+        product_fit_score=scores.get("product_fit_score"),
+        application_fit_score=scores.get("application_fit_score"),
+        customer_type_score=scores.get("customer_type_score"),
+        commercial_probability_score=scores.get("commercial_probability_score"),
+        technical_fit_score=scores.get("technical_fit_score"),
+        geographic_score=scores.get("geographic_score"),
+        credibility_score=scores.get("credibility_score"),
+        lead_grade=scores.get("lead_grade"),
+        recommended_action=scores.get("recommended_action"),
+        negative_flags=json.dumps(scores.get("negative_flags") or [], ensure_ascii=False),
         created_at=datetime.datetime.utcnow(),
     )
     db.add(snapshot)

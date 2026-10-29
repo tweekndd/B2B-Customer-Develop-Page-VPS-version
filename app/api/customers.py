@@ -20,6 +20,11 @@ from app.services.email_extractor import extract_emails_from_text
 from app.services.keyword_analyzer import analyze_keywords
 from app.services.glm_analyzer import analyze_company, generate_summary, get_buyer_intent_score, get_price_inquiry
 from app.services.scoring_engine import calculate_scores
+from app.services.lead_persistence import (
+    apply_ai_lead_fields,
+    apply_score_fields,
+    build_run_ai_result,
+)
 from app.services.email_composer import generate_email_draft, load_email_draft
 from app.services.search_task_service import request_stop
 from app.services.customer_email_service import bulk_upsert_customer_emails, upsert_customer_email, get_customer_emails
@@ -50,6 +55,17 @@ def _get_emails_list(customer: Customer) -> list:
         return json.loads(customer.emails)
     except (json.JSONDecodeError, TypeError):
         return [e.strip() for e in customer.emails.split(",") if e.strip()]
+
+
+def _parse_json_list(raw) -> list:
+    """安全解析 JSON 数组字段（V6.0：推荐产品/场景/证据/负面标记）"""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
 
 
 # ═══════════════════════════════════════════
@@ -99,6 +115,12 @@ _LIST_CUSTOMER_COLUMNS = (
     Customer.buyer_intent_score,
     Customer.is_price_inquiry,
     Customer.company_type,
+    # V6.0 Robotics Lead Qualification
+    Customer.customer_type,
+    Customer.industry,
+    Customer.lead_grade,
+    Customer.recommended_action,
+    Customer.confidence,
 )
 
 
@@ -191,6 +213,12 @@ def list_customers(
             "buyer_intent_score": c.buyer_intent_score,
             "is_price_inquiry": bool(c.is_price_inquiry),
             "company_type": c.company_type or "",
+            # V6.0 Robotics Lead Qualification
+            "customer_type": c.customer_type or c.company_type or "",
+            "industry": c.industry or "",
+            "lead_grade": c.lead_grade or c.priority or "",
+            "recommended_action": c.recommended_action or "",
+            "confidence": c.confidence,
         })
 
     return {
@@ -294,6 +322,24 @@ def get_customer_detail(customer_id: int, db: Session = Depends(get_db)):
         "total_score": customer.total_score,
         "priority": customer.priority or "-",
         "company_type": customer.company_type or "",
+        # V6.0 Robotics Lead Qualification
+        "customer_type": customer.customer_type or customer.company_type or "",
+        "industry": customer.industry or "",
+        "product_fit_score": customer.product_fit_score,
+        "application_fit_score": customer.application_fit_score,
+        "customer_type_score": customer.customer_type_score,
+        "commercial_probability_score": customer.commercial_probability_score,
+        "technical_fit_score": customer.technical_fit_score,
+        "geographic_score": customer.geographic_score,
+        "credibility_score": customer.credibility_score,
+        "lead_grade": customer.lead_grade or "",
+        "recommended_products": _parse_json_list(customer.recommended_products),
+        "likely_use_cases": _parse_json_list(customer.likely_use_cases),
+        "evidence": _parse_json_list(customer.evidence),
+        "negative_flags": _parse_json_list(customer.negative_flags),
+        "sales_angle": customer.sales_angle or customer.sales_hook or "",
+        "confidence": customer.confidence,
+        "recommended_action": customer.recommended_action or "",
         "ai_summary": customer.ai_summary or "",
         "sales_hook": customer.sales_hook or "",
         "target_position": customer.target_position or "",
@@ -392,32 +438,15 @@ async def analyze_single(
             if ai_result:
                 customer.ai_status = "success"
                 # V5.3 阶段3：主表不再保存大字段 ai_raw_json（由 analysis_runs.raw_json 承接）
-                customer.company_type = ai_result.get("company_type", "")
-                customer.sales_hook = ai_result.get("sales_hook", "")
-                customer.target_position = ai_result.get("target_position", "")
-                customer.identified_projects = ai_result.get("identified_projects", "")
-                # V4.6：买家意向评分 + 价格询盘标记（评分分级移植）
-                customer.buyer_intent_score = get_buyer_intent_score(ai_result)
-                customer.is_price_inquiry = 1 if get_price_inquiry(ai_result) else 0
-                # AI 提取城市（如果有且客户尚无 city）
-                ai_city = ai_result.get("address_city", "")
+                # V6.0：统一写入 Robotics Lead Qualification 字段
+                ai_city = apply_ai_lead_fields(customer, ai_result)
                 if ai_city and not customer.city:
-                    customer.city = ai_city.strip()
+                    customer.city = ai_city
                 customer_info = {"country": customer.country or "", "company_name": customer.company_name}
                 customer.ai_summary = generate_summary(ai_result, customer_info)
             else:
                 customer.ai_status = "failed"
                 customer.fail_reason = "AI分析失败（API可能超时）"
-            # V5.3 阶段2：保存 AI 分析运行记录
-            import hashlib as _hashlib
-            _content_hash = _hashlib.md5((website_text or "").encode("utf-8")).hexdigest()[:16]
-            _run = save_analysis_run(
-                db, customer.id, ai_result,
-                website_snapshot_id=snapshot_id,
-                content_hash=_content_hash,
-                status="success" if customer.ai_status == "success" else "failed",
-                error_message=None if customer.ai_status == "success" else customer.fail_reason,
-            )
             # V5.1：评分使用合并后的全量邮箱（含历史手动/发现邮箱）
             merged_emails = _get_emails_list(customer)
             scores = calculate_scores(
@@ -425,14 +454,19 @@ async def analyze_single(
                 company_type=customer.company_type, country=customer.country, emails=merged_emails,
                 is_price_inquiry=customer.is_price_inquiry == 1,
                 buyer_intent_score=customer.buyer_intent_score,
+                ai_result=ai_result,
             )
-            customer.industry_score = scores["industry_score"]
-            customer.project_score = scores["project_score"]
-            customer.company_type_score = scores["company_type_score"]
-            customer.country_score = scores["country_score"]
-            customer.contact_score = scores["contact_score"]
-            customer.total_score = scores["total_score"]
-            customer.priority = scores["priority"]
+            apply_score_fields(customer, scores)
+            # V5.3 阶段2：保存 AI 分析运行记录（含最终 grade/action）
+            import hashlib as _hashlib
+            _content_hash = _hashlib.md5((website_text or "").encode("utf-8")).hexdigest()[:16]
+            _run = save_analysis_run(
+                db, customer.id, build_run_ai_result(ai_result, scores),
+                website_snapshot_id=snapshot_id,
+                content_hash=_content_hash,
+                status="success" if customer.ai_status == "success" else "failed",
+                error_message=None if customer.ai_status == "success" else customer.fail_reason,
+            )
             # V5.3 阶段2：保存评分快照
             save_score_snapshot(db, customer.id, scores, analysis_run_id=_run.id if _run else None)
         customer.analyzed_at = datetime.datetime.utcnow()
@@ -783,19 +817,23 @@ async def rescrape_customer(customer_id: int, db: Session = Depends(get_db)):
             pos_hits, neg_hits = analyze_keywords(website_text)
             customer.positive_keywords = json.dumps(pos_hits, ensure_ascii=False)
             customer.negative_keywords = json.dumps(neg_hits, ensure_ascii=False)
-            # 重新评分（使用合并后的全量邮箱）
+            # 重新评分（使用合并后的全量邮箱 + 最近一次 AI 结果保持 7 维一致）
             merged_emails = _get_emails_list(customer)
+            _latest_runs = list_analysis_runs(db, customer.id, limit=1)
+            _ai_result = None
+            if _latest_runs and _latest_runs[0].raw_json:
+                try:
+                    _ai_result = json.loads(_latest_runs[0].raw_json)
+                except (json.JSONDecodeError, TypeError):
+                    _ai_result = None
             scores = calculate_scores(
                 website_text=website_text, positive_keywords=pos_hits,
                 company_type=customer.company_type, country=customer.country, emails=merged_emails,
+                is_price_inquiry=customer.is_price_inquiry == 1,
+                buyer_intent_score=customer.buyer_intent_score,
+                ai_result=_ai_result,
             )
-            customer.industry_score = scores["industry_score"]
-            customer.project_score = scores["project_score"]
-            customer.company_type_score = scores["company_type_score"]
-            customer.country_score = scores["country_score"]
-            customer.contact_score = scores["contact_score"]
-            customer.total_score = scores["total_score"]
-            customer.priority = scores["priority"]
+            apply_score_fields(customer, scores)
             # V5.3 阶段2：保存评分快照（重新抓取不触发 AI，仅评分变化）
             save_score_snapshot(db, customer.id, scores)
         else:
@@ -839,55 +877,43 @@ async def reanalyze_customer(
     _analyzing_set.add(customer_id)
     try:
         ai_result = await analyze_company(website_text, user_id=user.id)
-        # V5.3 阶段2：保存 AI 分析运行记录（成功/失败均记录，不覆盖历史）
+        if ai_result:
+            customer.ai_status = "success"
+            # V5.3 阶段3 / V6.0：统一写入 Robotics Lead Qualification 字段
+            ai_city = apply_ai_lead_fields(customer, ai_result)
+            if ai_city and not customer.city:
+                customer.city = ai_city
+            customer_info = {"country": customer.country or "", "company_name": customer.company_name}
+            customer.ai_summary = generate_summary(ai_result, customer_info)
+        else:
+            customer.ai_status = "failed"
+            customer.fail_reason = "AI分析失败（API可能超时）"
+
+        # 重新评分（公司类型/客户类型可能变了）
+        pos_hits = {}
+        if customer.positive_keywords:
+            try:
+                pos_hits = json.loads(customer.positive_keywords)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        emails = _get_emails_list(customer)
+        scores = calculate_scores(
+            website_text=website_text, positive_keywords=pos_hits,
+            company_type=customer.company_type, country=customer.country, emails=emails,
+            is_price_inquiry=customer.is_price_inquiry == 1,
+            buyer_intent_score=customer.buyer_intent_score,
+            ai_result=ai_result,
+        )
+        apply_score_fields(customer, scores)
+
+        # V5.3 阶段2：保存 AI 分析运行记录（成功/失败均记录，不覆盖历史；含最终 grade/action）
         _run = save_analysis_run(
-            db, customer.id, ai_result,
+            db, customer.id, build_run_ai_result(ai_result, scores),
             content_hash=None,
             status="success" if ai_result else "failed",
             error_message=None if ai_result else "AI分析失败（API可能超时）",
         )
-        if ai_result:
-            customer.ai_status = "success"
-            # V5.3 阶段3：主表不再保存大字段 ai_raw_json（由 analysis_runs.raw_json 承接）
-            customer.company_type = ai_result.get("company_type", "")
-            customer.sales_hook = ai_result.get("sales_hook", "")
-            customer.target_position = ai_result.get("target_position", "")
-            customer.identified_projects = ai_result.get("identified_projects", "")
-            # V4.6：买家意向评分 + 价格询盘标记（评分分级移植）
-            customer.buyer_intent_score = get_buyer_intent_score(ai_result)
-            customer.is_price_inquiry = 1 if get_price_inquiry(ai_result) else 0
-            # AI 提取城市（如果有且客户尚无 city）
-            ai_city = ai_result.get("address_city", "")
-            if ai_city and not customer.city:
-                customer.city = ai_city.strip()
-            customer_info = {"country": customer.country or "", "company_name": customer.company_name}
-            customer.ai_summary = generate_summary(ai_result, customer_info)
-            # 重新评分（公司类型可能变了）
-            pos_hits = {}
-            if customer.positive_keywords:
-                try:
-                    pos_hits = json.loads(customer.positive_keywords)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            emails = _get_emails_list(customer)
-            scores = calculate_scores(
-                website_text=website_text, positive_keywords=pos_hits,
-                company_type=customer.company_type, country=customer.country, emails=emails,
-                is_price_inquiry=customer.is_price_inquiry == 1,
-                buyer_intent_score=customer.buyer_intent_score,
-            )
-            customer.industry_score = scores["industry_score"]
-            customer.project_score = scores["project_score"]
-            customer.company_type_score = scores["company_type_score"]
-            customer.country_score = scores["country_score"]
-            customer.contact_score = scores["contact_score"]
-            customer.total_score = scores["total_score"]
-            customer.priority = scores["priority"]
-            # V5.3 阶段2：保存评分快照
-            save_score_snapshot(db, customer.id, scores, analysis_run_id=_run.id if _run else None)
-        else:
-            customer.ai_status = "failed"
-            customer.fail_reason = "AI分析失败（API可能超时）"
+        save_score_snapshot(db, customer.id, scores, analysis_run_id=_run.id if _run else None)
 
         customer.analyzed_at = datetime.datetime.utcnow()
         db.commit()
@@ -1040,6 +1066,26 @@ def _analysis_run_to_dict(r) -> dict:
         "needs_identified": needs,
         "product_match": r.product_match or "",
         "error_message": r.error_message or "",
+        # V6.0 Robotics Lead Qualification
+        "customer_type": r.customer_type or r.company_type or "",
+        "industry": r.industry or "",
+        "total_score": r.total_score,
+        "lead_grade": r.lead_grade or "",
+        "recommended_action": r.recommended_action or "",
+        "score_breakdown": {
+            "product_fit": r.product_fit_score,
+            "application_fit": r.application_fit_score,
+            "customer_type": r.customer_type_score,
+            "commercial_probability": r.commercial_probability_score,
+            "technical_fit": r.technical_fit_score,
+            "geographic_fit": r.geographic_score,
+            "credibility": r.credibility_score,
+        },
+        "recommended_products": _parse_json_list(r.recommended_products),
+        "likely_use_cases": _parse_json_list(r.likely_use_cases),
+        "evidence": _parse_json_list(r.evidence),
+        "negative_flags": _parse_json_list(r.negative_flags),
+        "confidence": r.confidence,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 

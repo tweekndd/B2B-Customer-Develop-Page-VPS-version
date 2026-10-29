@@ -30,8 +30,27 @@ from app.services.google_discovery import search_google
 from app.services.website_scraper import scrape_website
 from app.services.email_extractor import extract_emails_from_text
 from app.services.keyword_analyzer import analyze_keywords
-from app.services.glm_analyzer import analyze_company, generate_summary, get_buyer_intent_score, get_price_inquiry
+from app.services.glm_analyzer import (
+    analyze_company,
+    generate_summary,
+    get_buyer_intent_score,
+    get_price_inquiry,
+    get_customer_type,
+    get_industry,
+    get_recommended_products,
+    get_likely_use_cases,
+    get_evidence,
+    get_negative_flags,
+    get_sales_angle,
+    get_recommended_action,
+    get_confidence,
+)
 from app.services.scoring_engine import calculate_scores
+from app.services.lead_persistence import (
+    apply_ai_lead_fields,
+    apply_score_fields,
+    build_run_ai_result,
+)
 from app.services.customer_email_service import bulk_upsert_customer_emails
 from app.services.intelligence_service import (
     save_website_snapshot,
@@ -459,33 +478,14 @@ async def _auto_analyze_and_save(
 
         if ai_result:
             # V5.3 阶段3：主表不再保存大字段 ai_raw_json（由 analysis_runs.raw_json 承接）
-            customer.company_type = ai_result.get("company_type", "")
-            customer.sales_hook = ai_result.get("sales_hook", "")
-            customer.target_position = ai_result.get("target_position", "")
-            customer.identified_projects = ai_result.get("identified_projects", "")
-            # V4.6：买家意向评分 + 价格询盘标记（评分分级移植）
-            customer.buyer_intent_score = get_buyer_intent_score(ai_result)
-            customer.is_price_inquiry = 1 if get_price_inquiry(ai_result) else 0
-            # AI 提取城市（如果有且客户尚无 city）
-            ai_city = ai_result.get("address_city", "")
+            # V6.0：统一写入 Robotics Lead Qualification 字段（含买家意向/价格询盘）
+            ai_city = apply_ai_lead_fields(customer, ai_result)
             if ai_city and not customer.city:
                 customer.city = ai_city.strip()
             customer_info = {"country": country, "company_name": title}
             customer.ai_summary = generate_summary(ai_result, customer_info)
 
-        # V5.3 阶段2：保存 AI 分析运行记录（失败也记录）
-        import hashlib as _hashlib
-        _content_hash = _hashlib.md5((website_text or "").encode("utf-8")).hexdigest()[:16]
-        _run = save_analysis_run(
-            db, customer.id, ai_result,
-            website_snapshot_id=snapshot_id,
-            content_hash=_content_hash,
-            provider=_get_llm_provider_name(),
-            status="success" if (customer.ai_status or "success") == "success" else "failed",
-            error_message=None if customer.ai_status == "success" else customer.fail_reason,
-        )
-
-        # 步骤5：规则评分
+        # 步骤5：评分（V6.0 7 维 Lead Scoring，优先采用 AI score_breakdown）
         scores = calculate_scores(
             website_text=website_text,
             positive_keywords=pos_hits,
@@ -494,15 +494,21 @@ async def _auto_analyze_and_save(
             emails=email_list,
             is_price_inquiry=customer.is_price_inquiry == 1,
             buyer_intent_score=customer.buyer_intent_score,
+            ai_result=ai_result,
         )
+        apply_score_fields(customer, scores)
 
-        customer.industry_score = scores["industry_score"]
-        customer.project_score = scores["project_score"]
-        customer.company_type_score = scores["company_type_score"]
-        customer.country_score = scores["country_score"]
-        customer.contact_score = scores["contact_score"]
-        customer.total_score = scores["total_score"]
-        customer.priority = scores["priority"]
+        # V5.3 阶段2：保存 AI 分析运行记录（失败也记录；含最终 grade/action）
+        import hashlib as _hashlib
+        _content_hash = _hashlib.md5((website_text or "").encode("utf-8")).hexdigest()[:16]
+        _run = save_analysis_run(
+            db, customer.id, build_run_ai_result(ai_result, scores),
+            website_snapshot_id=snapshot_id,
+            content_hash=_content_hash,
+            provider=_get_llm_provider_name(),
+            status="success" if (customer.ai_status or "success") == "success" else "failed",
+            error_message=None if customer.ai_status == "success" else customer.fail_reason,
+        )
 
         # V5.3 阶段2：保存评分快照
         save_score_snapshot(db, customer.id, scores, analysis_run_id=_run.id if _run else None)
