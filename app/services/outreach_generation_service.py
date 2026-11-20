@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.database import (
     Customer,
     GenerationRun,
+    MailSenderAccount,
     OutreachDraft,
     PromptTemplate,
     PromptVersion,
@@ -161,23 +162,44 @@ async def generate_outreach_draft(
     *,
     user_id: Optional[int] = None,
     template_id: Optional[int] = None,
+    scenario: Optional[str] = None,
     product_keywords: Optional[List[str]] = None,
-    extra_context: str = "",
     product_name: str = "",
+    product_description: str = "",
+    product_key_features: str = "",
+    product_applications: str = "",
+    product_specifications: str = "",
+    extra_context: str = "",
     sender_company: str = "",
+    sender_name: str = "",
+    sender_title: str = "",
+    sender_email: str = "",
     sender_signature: str = "",
+    company_website: str = "",
     call_to_action: str = "",
     language: str = "auto",
     auto_submit: bool = False,
 ) -> Dict[str, Any]:
     """生成一封可溯源的外联草稿（走 Prompt 模板体系）。
 
+    产品与发件人变量安全降级：缺失时留空，绝不臆造规格/认证/联系方式；
+    未替换的 {{...}} 占位符由 renderer 清空，不会发给 LLM。
+
     Returns:
-        {"draft": {...}, "generation_run": {...}}
+        {"draft": {...}, "generation_run": {...}, "draft_id": ..., "generation_run_id": ...}
     Raises:
         GenerationError
     """
-    template = prompt_service.get_active_template(db, template_id)
+    # 按场景选模板；未传 template_id 时，匹配 purpose 的 active 模板优先，
+    # 否则退回任意 active 模板；均无则报错。
+    template = prompt_service.get_template_for_scenario(db, scenario)
+    if template_id:
+        try:
+            t = prompt_service.get_template(db, template_id)
+        except PromptError:
+            t = None
+        if t is not None:
+            template = t
     if template is None:
         raise GenerationError(
             "尚未配置可用的 Prompt 模板：请先在「Prompt 管理」发布一个 active 模板",
@@ -196,15 +218,43 @@ async def generate_outreach_draft(
     # 1) 语言
     lang_code = language if language and language != "auto" else detect_language_code(customer.country)
 
+    # 发件人信息回退：模板字段 > 用户默认发件账户 > 空（不臆造联系方式）
+    sender_company = sender_company or template.sender_company or ""
+    sender_signature = sender_signature or template.sender_signature or ""
+    if not (sender_company or sender_email or sender_signature):
+        try:
+            acct = (
+                db.query(MailSenderAccount)
+                .filter(MailSenderAccount.enabled == 1, MailSenderAccount.status == "active")
+                .order_by(MailSenderAccount.updated_at.desc())
+                .first()
+            )
+            if acct:
+                sender_company = sender_company or acct.display_name or acct.email_address
+                sender_email = sender_email or acct.email_address
+        except Exception:  # noqa: BLE001 - 读发件账户失败不阻断生成
+            pass
+
     # 2) 渲染白名单变量
     facts = build_customer_facts(db, customer, product_keywords=product_keywords, extra_context=extra_context)
+    _kw_joined = "、".join([k for k in (product_keywords or []) if k]) or product_name or ""
     reserved_vars = {
         "system.now_utc": datetime.datetime.utcnow().strftime("%Y-%m-%d"),
         "system.sender_company": sender_company,
+        "system.sender_name": sender_name,
+        "system.sender_title": sender_title,
+        "system.sender_email": sender_email,
         "system.sender_signature": sender_signature,
-        "system.product_name": product_name,
-        "system.product_keywords": "、".join([k for k in (product_keywords or []) if k]) or product_name,
+        "system.company_website": company_website,
+        "system.product_name": product_name or template.product_name or "",
+        "system.product_keywords": _kw_joined,
         "system.call_to_action": call_to_action,
+        "product.name": product_name or "",
+        "product.keywords": _kw_joined,
+        "product.description": product_description or "",
+        "product.key_features": product_key_features or "",
+        "product.applications": product_applications or "",
+        "product.specifications": product_specifications or "",
     }
     all_vars = {**facts, **reserved_vars}
     schema = template.variables_schema_json
@@ -245,7 +295,7 @@ async def generate_outreach_draft(
         provider="",
         model="",
         model_config_json=json.dumps(model_cfg, ensure_ascii=False) if model_cfg else None,
-        input_snapshot_json=json.dumps(facts, ensure_ascii=False),
+        input_snapshot_json=json.dumps(all_vars, ensure_ascii=False),
         rendered_prompt_hash=prompt_renderer.render_hash(rendered_user),
         created_by_user_id=user_id,
     )
@@ -274,8 +324,8 @@ async def generate_outreach_draft(
 
     run.output_json = json.dumps(parsed, ensure_ascii=False)
 
-    # 5) Guard 规则检查
-    guard = run_guard(parsed)
+    # 5) Guard 规则检查（传入输入事实，用于 facts_used 溯源校验）
+    guard = run_guard(parsed, input_facts=all_vars)
     run.checks_json = guard_to_json(guard)
     run.risk_flags_json = json.dumps(guard.risk_flags, ensure_ascii=False)
     run.result_status = "success"
@@ -317,7 +367,9 @@ async def generate_outreach_draft(
 
     return {
         "draft": _draft_to_dict(draft),
+        "draft_id": draft.id,
         "generation_run": _run_to_dict(run),
+        "generation_run_id": run.id,
         "guard": guard.to_dict(),
     }
 

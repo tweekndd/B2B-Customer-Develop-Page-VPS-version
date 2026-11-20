@@ -15,7 +15,7 @@ Guard 只做「标记 + 阻断严重项」，最终是否发送仍由人工审�
 """
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # 高危承诺词（出现即 needs_review，但文案可能是「我们不承诺价格」等否定句式，
 # 交由审核人判断 —— 故只标 risk 不阻断）
@@ -87,6 +87,7 @@ def run_guard(
     *,
     max_subject_len: int = 150,
     max_body_len: int = 8000,
+    input_facts: Optional[Dict[str, Any]] = None,
 ) -> GuardResult:
     """对结构化输出执行规则检查，返回 GuardResult。
 
@@ -134,9 +135,28 @@ def run_guard(
         "message": "包含: " + ", ".join(compliance_hits) if compliance_hits else "未包含退订类措辞（如需可人工补充）",
     }
 
-    # 6) facts_used 必须来自输入快照的白名单字段（无法深度校验，此处仅统计）
+    # 6) facts_used 溯源：每条引用应能在输入快照的键或值中找到踪迹，
+    #    无法溯源仅标记风险，不阻断落库。
     facts_used = parsed.get("facts_used") if isinstance(parsed.get("facts_used"), list) else []
-    checks["facts_used"] = {"passed": len(facts_used) > 0, "message": f"引用事实 {len(facts_used)} 条"}
+    ungrounded: List[str] = []
+    if input_facts:
+        haystack = " | ".join(
+            [str(k) for k in input_facts.keys()] + [str(v) for v in input_facts.values()]
+        )
+        for f in facts_used:
+            if not f or not isinstance(f, str):
+                continue
+            key = f.strip()
+            # 支持 "customer.company_name" 等完整键，或值中的片段命中
+            if key not in input_facts and key not in haystack:
+                ungrounded.append(key)
+    checks["facts_used"] = {
+        "passed": len(facts_used) > 0 and not ungrounded,
+        "message": f"引用事实 {len(facts_used)} 条"
+        + (f"，{len(ungrounded)} 条无法溯源" if ungrounded else ""),
+    }
+    if ungrounded:
+        risk_flags.append("facts_used 存在无法溯源的条目")
 
     # 7) claims_requiring_review —— AI 自报的可疑陈述
     claims = parsed.get("claims_requiring_review") if isinstance(parsed.get("claims_requiring_review"), list) else []

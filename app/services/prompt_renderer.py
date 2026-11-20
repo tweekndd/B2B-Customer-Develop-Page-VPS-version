@@ -15,12 +15,18 @@ import re
 from typing import Any, Dict, List, Optional
 
 _VAR_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")
+# 渲染后若仍残留任何 {{...}} 占位符（未声明/未求值），统一清空，避免发给 LLM。
+_UNRESOLVED_RE = re.compile(r"\{\{[^}]*\}\}")
 
 # 保留变量（渲染器内部注入，不来自客户数据）
 _RESERVED_VARS = {
     "system.now_utc",        # 当前 UTC 时间（发信日）
     "system.sender_company", # 发件公司名
+    "system.sender_name",    # 发件人姓名
+    "system.sender_title",   # 发件人职务
+    "system.sender_email",   # 发件人邮箱
     "system.sender_signature",  # 签名
+    "system.company_website", # 我方公司官网
     "system.product_name",   # 产品名
     "system.product_keywords",  # 产品关键词列表（逗号拼接）
     "system.call_to_action", # 本次 CTA
@@ -140,6 +146,8 @@ def render_template(
         return sanitize_value(variables.get(name), max_length=3000)
 
     out = _VAR_RE.sub(lambda m: _resolve(m.group(1)), template or "")
+    # 安全降级：绝不把未替换的 {{...}} 发送给 LLM，残留占位符统一清为空。
+    out = _UNRESOLVED_RE.sub("", out)
     return out
 
 
@@ -185,7 +193,12 @@ def default_template_docs() -> List[Dict[str, str]]:
         {"var": "customer.product_match", "type": "string", "desc": "对方可能需要的产品"},
         {"var": "customer.target_position", "type": "string", "desc": "建议联系职位"},
         {"var": "customer.language", "type": "string", "desc": "客户语言"},
-        {"var": "product.key_features", "type": "string", "desc": "产品要点"},
+        {"var": "product.name", "type": "string", "desc": "产品名称"},
+        {"var": "product.keywords", "type": "string", "desc": "产品关键词（逗号分隔）"},
+        {"var": "product.description", "type": "string", "desc": "产品介绍"},
+        {"var": "product.key_features", "type": "string", "desc": "产品核心优势"},
+        {"var": "product.applications", "type": "string", "desc": "产品应用场景"},
+        {"var": "product.specifications", "type": "string", "desc": "产品技术参数"},
         {"var": "system.now_utc", "type": "datetime", "desc": "当前 UTC 日期（保留变量）"},
         {"var": "system.sender_company", "type": "string", "desc": "发件公司（保留变量）"},
         {"var": "system.sender_signature", "type": "string", "desc": "签名（保留变量）"},

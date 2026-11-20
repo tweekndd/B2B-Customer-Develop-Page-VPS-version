@@ -5,6 +5,7 @@
 
 let _currentTemplateId = null;
 let _varDocs = [];
+const _isAdmin = window.CURRENT_USER_IS_ADMIN === true;
 
 async function loadTemplates() {
     const status = document.getElementById('templateStatusFilter')?.value || '';
@@ -20,7 +21,7 @@ async function loadTemplates() {
         }
         box.innerHTML = templates.map(t => {
             const st = t.status === 'active' ? 'bg-success' : t.status === 'draft' ? 'bg-warning text-dark' : 'bg-secondary';
-            return `<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center gap-2 py-2 ${t.id === _currentTemplateId ? 'active' : ''}" style="cursor:pointer;" onclick="openTemplate(${t.id})">
+            return `<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center gap-2 py-2 ${t.id === _currentTemplateId ? 'active' : ''}" style="cursor:${_isAdmin ? 'pointer' : 'default'}" ${_isAdmin ? `onclick="openTemplate(${t.id})"` : ''}>
                 <div style="min-width:0;">
                     <div class="d-flex align-items-center gap-2">
                         <span class="fw-bold text-truncate" style="max-width:180px;">${_esc(t.name)}</span>
@@ -69,6 +70,7 @@ async function openTemplate(id) {
 }
 
 function openEditor() {
+    if (!_isAdmin) { showToast('仅管理员可编辑 Prompt 模板', 'warning'); return; }
     _currentTemplateId = null;
     document.getElementById('editorTitle').innerHTML = '<i class="bi bi-plus-circle me-2 text-accent"></i>新建模板';
     ['fName','fPurpose','fLanguage','fFreedom','fProduct','fSegment','fSystem','fUser','fSchema','fModelCfg']

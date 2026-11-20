@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 # AI Customer Development System
 
@@ -191,6 +191,7 @@ alembic upgrade head    # 已部署 Phase0 的库
 | **GLM AI 分析** | 识别公司类型、分析原因、生成开发切入点和推荐联系职位，支持模型自动降级 |
 | **买家/供应商分级 V4.6** | AI 买家意向评分(0-10)：同类产品制造商=低分，明确采购/招标/项目需求=高分，经销商/进口商/贸易商=高价值采购方（7-9），不因非终端用户降分 |
 | **多语种开发信 V4.6** | 产品关键词驱动的 AI 开发信自动生成，按国家自动检测语言（130+ 国家），一键复制/打开邮件客户端 |
+| **AI 智能开发信助手 V6.5** | 统一入口：客户自动加载 → 场景/产品/语言选择 → Generate → 可编辑 Subject/Body → Save Draft / Regenerate / Submit for Approval，生成默认不自动提交审批 |
 | **AI 与 API 设置页 V4.6** | 网页上配置 LLM/搜索引擎/邮箱 API Key（无需环境变量），多 Provider 支持 + 测试连接，Key 加密存储、按用户隔离、自动回退服务器默认 |
 | **规则评分引擎** | 7 维 100 分制：产品匹配(30) + 应用场景(20) + 客户类型(15) + 采购可能性(15) + 技术/业务能力(10) + 地理匹配(5) + 可信度(5)，可运行时配置；AI 不可用时自动回退规则关键词 |
 | **Hunter 邮箱查找** | Hunter.io API，支持域名搜索、姓名精确查找、部门/级别筛选，5 层配额优化策略 |
@@ -419,14 +420,16 @@ cp .env.example .env
 - 跟进状态管理 + 客户评级
 - **买家意向徽章**：AI 给出买家意向评分（0-10），供应商/制造商=低分，矿场/EPC/经销商/贸易商=高分，高意向客户标注「🔥 询价」
 
-#### AI 写开发信（V4.6）
+#### AI 智能开发信助手（V6.5 Phase1）
 
-详情页 → 「AI 开发信生成」卡片：
-1. 选择语言（默认按客户国家自动检测，支持 130+ 国家，如墨西哥 → 西班牙语）
-2. 填写产品关键词（留空则自动从客户 AI 分析中提取）
-3. 点击 **生成开发信** → AI 输出 Subject + Body，可一键**复制**或**打开邮件客户端**
+详情页 → 「AI 智能开发信助手」卡片：
+1. 客户信息自动加载（公司名、国家、官网等，无需重复填写）。
+2. 选择开发信场景（默认「首次开发信」）、产品（预设或手动输入）、产品关键词、邮件语言（Auto Detect / 英语 / 西语 / …）及附加要求（可选）。
+3. 点击 **Generate Email** → AI 结合客户事实与产品信息生成 Subject + Body，进入**可编辑预览**。
+4. 用户可修改主题/正文，点击 **Save Draft** 保存草稿，或点击 **Regenerate** 重新生成；**仅点击「Submit for Approval」才进入 Pending 人工审批**，生成本身不自动提交。
+5. 草稿进入「邮件审核」页，由人工确认后走现有 Himalaya/Worker 发送流程。
 
-> 系统会记住最近一次生成的草稿，刷新页面后仍保留，方便对照修改后手动发送。
+> 生成默认仅保存为 Draft，不会自动进入 Pending。旧版 `email_composer.py`（V4.6）保留以兼容其他页面/接口，不做删除。
 
 #### 邮箱联系人维护（V5.1）
 
@@ -769,7 +772,7 @@ AI-Trade-Customer-Analyzer/
 │   ├── static/js/                    # JS 模块（含 settings.js 设置页）
 │   ├── templates/                    # HTML 模板（含 settings.html / filemanager.html）
 │   └── filemanager.py                # VPS 文件管理器（仅管理员）
-└── tests/                            # 488 个测试用例
+└── tests/                            # 513 个测试用例
 ```
 
 ---
@@ -864,7 +867,7 @@ AI-Trade-Customer-Analyzer/
 | **爬虫** | httpx + BeautifulSoup（异步并发）· Jina AI Reader 免费降级 |
 | **地图** | Leaflet.js + MarkerCluster + Nominatim |
 | **部署** | Docker · Docker Compose · Nginx · Let's Encrypt |
-| **测试** | pytest（488 测试用例：纯逻辑单元 + API 集成） |
+| **测试** | pytest（513 测试用例：纯逻辑单元 + API 集成） |
 | **缓存** | 本地 SQLite 多级缓存（搜索 / 官网 / AI 分析 / 邮箱 / 地理编码） |
 | **认证** | Session + bcrypt · 多用户 · 逐用户配额管控 |
 
@@ -874,7 +877,7 @@ AI-Trade-Customer-Analyzer/
 
 ```bash
 source venv/bin/activate
-pytest tests/ -v     # 488 测试，详细输出
+pytest tests/ -v     # 513 测试，详细输出
 pytest tests/ -q     # 简洁输出
 ```
 
@@ -885,6 +888,7 @@ pytest tests/ -q     # 简洁输出
 **© 2026 AI Customer Development System** · Apache-2.0 License · [GitHub](https://github.com/tweekndd/B2B-Customer-Develop-Page-VPS-version)
 
 </div>
+
 
 
 

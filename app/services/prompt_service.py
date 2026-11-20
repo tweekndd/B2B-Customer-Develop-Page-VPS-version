@@ -29,6 +29,9 @@ from app.services.prompt_renderer import (
 )
 
 
+DEFAULT_TEMPLATE_NAME = "通用首封开发信（默认 L1）"
+
+
 class PromptError(Exception):
     def __init__(self, message: str, status_code: int = 400):
         super().__init__(message)
@@ -152,6 +155,28 @@ def get_active_template(db: Session, template_id: Optional[int] = None) -> Optio
         .order_by(PromptTemplate.updated_at.desc())
         .first()
     )
+
+
+def get_template_for_scenario(
+    db: Session, scenario: Optional[str] = None
+) -> Optional[PromptTemplate]:
+    """按开发信场景（purpose）选模板；无匹配则退回任意 active 模板。
+
+    面向普通业务员：缺少对应场景模板时，用通用模板生成，不阻断功能。
+    """
+    if scenario:
+        t = (
+            db.query(PromptTemplate)
+            .filter(
+                PromptTemplate.status == TEMPLATE_STATUS_ACTIVE,
+                PromptTemplate.purpose == scenario,
+            )
+            .order_by(PromptTemplate.updated_at.desc())
+            .first()
+        )
+        if t is not None:
+            return t
+    return get_active_template(db)
 
 
 def create_template(
@@ -483,18 +508,47 @@ AI 官网摘要：{{customer.ai_summary}}
 
 
 def ensure_seed_templates(db: Session) -> None:
-    """幂等创建内置默认模板（首次部署自动生成，用户可编辑/归档）。
+    """幂等创建并发布内置默认模板。
 
-    找不到任何模板时创建一份 L1「通用首封开发信」。
+    - 全新部署且无任何模板：创建默认模板，自动发布为 active 版本。
+    - 默认模板已存在但仍为 draft 且未发布（current_version == 0）：自动发布。
+    - 默认模板已发布，或库里已有用户自定义模板：不覆盖、不重复创建。
     """
     from app.models.prompts import FREEDOM_L1
-    count = db.query(PromptTemplate).count()
-    if count > 0:
+
+    existing = (
+        db.query(PromptTemplate)
+        .filter(PromptTemplate.name == DEFAULT_TEMPLATE_NAME)
+        .first()
+    )
+
+    if existing is not None:
+        # 仅当种子模板从未发布过时，自动发布；已有内容或用户已改动的不覆盖。
+        if (
+            existing.status == TEMPLATE_STATUS_DRAFT
+            and existing.current_version == 0
+            and existing.created_by_user_id is None
+        ):
+            try:
+                publish_version(
+                    db,
+                    existing.id,
+                    change_summary="系统自动发布默认模板",
+                    created_by_user_id=None,
+                )
+            except PromptError:
+                db.rollback()
         return
+
+    # 没有默认模板：仅在库里完全没有模板时才创建，避免干扰用户已有模板
+    total = db.query(PromptTemplate).count()
+    if total > 0:
+        return
+
     try:
-        create_template(
+        t = create_template(
             db,
-            name="通用首封开发信（默认 L1）",
+            name=DEFAULT_TEMPLATE_NAME,
             purpose="first_contact",
             language="auto",
             system_prompt=DEFAULT_SYSTEM_PROMPT,
@@ -503,7 +557,13 @@ def ensure_seed_templates(db: Session) -> None:
             model_config={"temperature": 0.7, "max_tokens": 2048},
             freedom_level=FREEDOM_L1,
             customer_segment="通用（EPC/工程商/经销商/终端均可）",
+            created_by_user_id=None,
         )
-        db.commit()
+        publish_version(
+            db,
+            t["id"],
+            change_summary="系统初始化默认模板",
+            created_by_user_id=None,
+        )
     except PromptError:
         db.rollback()

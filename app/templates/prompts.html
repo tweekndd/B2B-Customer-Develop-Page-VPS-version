@@ -4,7 +4,9 @@
 
 {% block top_bar_actions %}
 <button class="btn btn-outline-primary btn-sm" onclick="loadTemplates()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+{% if current_user and current_user.role == 'admin' %}
 <button class="btn btn-accent btn-sm" onclick="openEditor()"><i class="bi bi-plus-lg"></i> 新建模板</button>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -13,23 +15,16 @@
     <div class="col-lg-5">
         <div class="card border-0">
             <div class="card-header d-flex justify-content-between align-items-center" style="background:transparent; border-bottom:1px solid var(--border-color); padding:0.9rem 1.25rem;">
-                <h6 class="mb-0 fw-bold"><i class="bi bi-collection me-2 text-accent"></i>模板列表</h6>
-                <div>
-                    <select id="templateStatusFilter" class="form-select form-select-sm" style="width:auto; display:inline-block;" onchange="loadTemplates()">
-                        <option value="">全部状态</option>
-                        <option value="active">已发布(active)</option>
-                        <option value="draft">草稿</option>
-                        <option value="archived">已归档</option>
-                    </select>
-                </div>
+                <h6 class="mb-0 fw-bold"><i class="bi bi-collection me-2 text-accent"></i>可用开发信模板</h6>
             </div>
             <div class="card-body p-0" style="max-height: calc(100vh - 220px); overflow:auto;">
                 <div id="templateList" class="list-group list-group-flush"></div>
             </div>
         </div>
     </div>
-    <!-- 右侧：编辑 / 详情 -->
+    <!-- 右侧：编辑 / 详情（仅管理员） -->
     <div class="col-lg-7">
+        {% if current_user and current_user.role == 'admin' %}
         <div class="card border-0">
             <div class="card-header d-flex justify-content-between align-items-center" style="background:transparent; border-bottom:1px solid var(--border-color); padding:0.9rem 1.25rem;">
                 <h6 class="mb-0 fw-bold" id="editorTitle"><i class="bi bi-pencil-square me-2 text-accent"></i>新建 / 编辑模板</h6>
@@ -107,6 +102,15 @@
                 </div>
             </div>
         </div>
+        {% else %}
+        <div class="card border-0">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-shield-check text-muted fs-3 d-block mb-3"></i>
+                <p class="text-muted">普通用户仅可查看和选择开发信模板。</p>
+                <p class="text-muted small">如需编辑/发布 Prompt 模板，请联系管理员进入管理后台。</p>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 
@@ -129,5 +133,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+window.CURRENT_USER_IS_ADMIN = {% if current_user and current_user.role == 'admin' %}true{% else %}false{% endif %};
+</script>
 <script src="/static/js/prompts.js"></script>
 {% endblock %}

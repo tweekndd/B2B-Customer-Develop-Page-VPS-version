@@ -397,3 +397,82 @@ class TestTaskService:
         assert c.attempts == 1
         # available_at 已推迟 → 现在不能再次抢占
         assert ts.claim_next_task(db, "w1") is None
+
+
+# ═════════════════════════════════════════════════════════════
+# 7) 种子模板自动发布（幂等 + Active，不覆盖用户）
+# ═════════════════════════════════════════════════════════════
+
+class TestSeedAutoPublish:
+    def test_seed_creates_and_publishes_active(self, db):
+        from app.services.prompt_service import ensure_seed_templates, DEFAULT_TEMPLATE_NAME
+        from app.services import prompt_service as ps
+        from app.database import PromptTemplate
+        ensure_seed_templates(db)
+        t = db.query(PromptTemplate).filter(PromptTemplate.name == DEFAULT_TEMPLATE_NAME).first()
+        assert t is not None
+        assert t.status == "active"
+        assert t.current_version == 1
+        assert len(ps.list_versions(db, t.id)) == 1
+
+    def test_seed_idempotent_no_duplicate(self, db):
+        from app.services.prompt_service import ensure_seed_templates
+        from app.database import PromptTemplate
+        ensure_seed_templates(db)
+        ensure_seed_templates(db)
+        assert db.query(PromptTemplate).count() == 1
+
+    def test_seed_does_not_overwrite_existing(self, db):
+        from app.services.prompt_service import ensure_seed_templates, DEFAULT_TEMPLATE_NAME
+        from app.services import prompt_service as ps
+        from app.database import PromptTemplate
+        from app.models.prompts import FREEDOM_L1
+        ps.create_template(db, name=DEFAULT_TEMPLATE_NAME, purpose="first_contact", language="auto",
+                           system_prompt="user sys", user_prompt_template="hi {{customer.company_name}}",
+                           variables_schema={"customer.company_name": {"type": "string"}},
+                           freedom_level=FREEDOM_L1, created_by_user_id=99)
+        ensure_seed_templates(db)
+        t = db.query(PromptTemplate).filter(PromptTemplate.name == DEFAULT_TEMPLATE_NAME).first()
+        assert t.system_prompt == "user sys"
+        assert t.created_by_user_id == 99
+
+    def test_get_template_for_scenario(self, db):
+        from app.services.prompt_service import ensure_seed_templates, get_template_for_scenario
+        ensure_seed_templates(db)
+        t = get_template_for_scenario(db, "first_contact")
+        assert t is not None and t.status == "active"
+        t2 = get_template_for_scenario(db, "nonexistent_scenario")
+        assert t2 is not None  # 退回任意 active 模板
+
+
+# ═════════════════════════════════════════════════════════════
+# 8) 渲染器：残留占位符不发给 LLM
+# ═════════════════════════════════════════════════════════════
+
+class TestRendererNoUnresolved:
+    def test_unresolved_placeholders_cleared(self):
+        from app.services.prompt_renderer import render_template
+        schema = {"customer.company_name": {"type": "string"}}
+        out = render_template("Hi {{customer.company_name}} {{unknown.var}}",
+                              {"customer.company_name": "Acme"}, schema, strict=False)
+        assert "{{unknown.var}}" not in out
+        assert out == "Hi Acme "
+
+
+# ═════════════════════════════════════════════════════════════
+# 9) Guard：facts_used 事实溯源
+# ═════════════════════════════════════════════════════════════
+
+class TestGuardFactTraceability:
+    def test_ungrounded_facts_flagged(self):
+        from app.services.generation_guard import run_guard
+        g = run_guard({"subject": "S", "body": "B", "facts_used": ["customer.phone"]},
+                      input_facts={"customer.company_name": "Acme", "customer.country": "DE"})
+        assert g.needs_human_review is True
+        assert any("无法溯源" in f for f in g.risk_flags)
+
+    def test_grounded_facts_ok(self):
+        from app.services.generation_guard import run_guard
+        g = run_guard({"subject": "S", "body": "B", "facts_used": ["customer.company_name"]},
+                      input_facts={"customer.company_name": "Acme", "customer.country": "DE"})
+        assert g.needs_human_review is False

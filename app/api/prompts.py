@@ -5,7 +5,7 @@ Prompt 管理 API（Phase1 新增）
 对比版本、发布 active、回滚历史、查看使用记录。
 """
 import json
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -25,6 +25,21 @@ def _err(e: ps.PromptError):
     return HTTPException(status_code=e.status_code, detail=str(e))
 
 
+def _public_template_dict(t: Dict[str, Any]) -> Dict[str, Any]:
+    """仅对外暴露普通用户可看的模板摘要，不含技术配置。"""
+    return {
+        "id": t.get("id"),
+        "name": t.get("name"),
+        "purpose": t.get("purpose"),
+        "language": t.get("language"),
+        "customer_segment": t.get("customer_segment"),
+        "product_name": t.get("product_name"),
+        "status": t.get("status"),
+        "current_version": t.get("current_version"),
+        "updated_at": t.get("updated_at"),
+    }
+
+
 # ── 模板 CRUD ─────────────────────────────────────────────────────
 
 @router.get("/prompts")
@@ -37,7 +52,18 @@ def list_prompts(
         rows = ps.list_templates(db, status=status)
     except ps.PromptError as e:
         raise _err(e)
+    if getattr(user, "role", None) != "admin":
+        rows = [_public_template_dict(r) for r in rows]
     return {"templates": rows, "count": len(rows)}
+
+
+# ── 变量文档（管理员）─────────────────────────────────────────────
+
+@router.get("/prompts/meta/variables")
+def prompt_variables_doc(user=Depends(require_admin)):
+    """返回可插入变量说明（前端模板编辑器使用，管理员）"""
+    from app.services.prompt_renderer import default_template_docs
+    return {"variables": default_template_docs()}
 
 
 @router.get("/prompts/{template_id}")
@@ -46,8 +72,9 @@ def get_prompt(template_id: int, db: Session = Depends(get_db), user=Depends(req
         t = ps.get_template(db, template_id)
     except ps.PromptError as e:
         raise _err(e)
-    versions = ps.list_versions(db, template_id)
-    return {"template": ps.template_to_dict(t), "versions": versions}
+    if getattr(user, "role", None) != "admin":
+        return {"template": _public_template_dict(ps.template_to_dict(t)), "versions": []}
+    return {"template": ps.template_to_dict(t), "versions": ps.list_versions(db, template_id)}
 
 
 @router.post("/prompts")
@@ -200,21 +227,13 @@ def delete_prompt(template_id: int, db: Session = Depends(get_db),
 
 @router.get("/prompts/{template_id}/versions")
 def list_prompt_versions(template_id: int, db: Session = Depends(get_db),
-                         user=Depends(require_user)):
+                         user=Depends(require_admin)):
+    """版本历史仅管理员可见（含模板技术内容）。"""
     try:
         ps.get_template(db, template_id)
     except ps.PromptError as e:
         raise _err(e)
     return {"versions": ps.list_versions(db, template_id)}
-
-
-# ── 变量文档 ──────────────────────────────────────────────────────
-
-@router.get("/prompts/meta/variables")
-def prompt_variables_doc(user=Depends(require_user)):
-    """返回可插入变量说明（前端模板编辑器使用）"""
-    from app.services.prompt_renderer import default_template_docs
-    return {"variables": default_template_docs()}
 
 
 # ── 预览（不调用 LLM） ────────────────────────────────────────────
@@ -223,7 +242,7 @@ def prompt_variables_doc(user=Depends(require_user)):
 def preview_prompt(
     body: dict,
     db: Session = Depends(get_db),
-    user=Depends(require_user),
+    user=Depends(require_admin),
 ):
     """预览变量替换后的完整提示词（测试渲染，不消耗 AI）。
 

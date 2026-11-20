@@ -11,13 +11,14 @@ outreach_generation_service / outreach_service / task_service / worker。
 """
 import datetime
 import json
-from typing import Optional
+import os
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_user, get_current_user
-from app.database import Customer, OutreachDraft, get_db
+from app.database import Customer, MailSenderAccount, OutreachDraft, PromptTemplate, get_db
 from app.services import outreach_generation_service as ogs
 from app.services import outreach_service as osvc
 
@@ -54,26 +55,119 @@ async def generate_outreach(
     """
     body = body or {}
     customer = _customer_or_404(db, customer_id)
+
+    # 支持嵌套 product 对象，兼容扁平字段
+    product = body.get("product") or {}
+    product_name = body.get("product_name") or product.get("name") or ""
+    product_keywords = body.get("product_keywords")
+    if product_keywords is None and product.get("keywords"):
+        product_keywords = product.get("keywords")
+    if isinstance(product_keywords, str):
+        product_keywords = [k.strip() for k in product_keywords.split(",") if k.strip()]
+    product_keywords = list(product_keywords or [])
+    product_description = body.get("product_description") or product.get("description") or ""
+    product_key_features = body.get("product_key_features") or product.get("key_features") or ""
+    product_applications = body.get("product_applications") or product.get("applications") or ""
+    product_specifications = body.get("product_specifications") or product.get("specifications") or ""
+
     try:
         result = await ogs.generate_outreach_draft(
             db, customer,
             user_id=user.id,
             template_id=body.get("template_id"),
-            product_keywords=body.get("product_keywords"),
-            product_name=body.get("product_name") or "",
+            scenario=body.get("scenario") or "",
+            product_keywords=product_keywords,
+            product_name=product_name,
+            product_description=product_description,
+            product_key_features=product_key_features,
+            product_applications=product_applications,
+            product_specifications=product_specifications,
+            extra_context=body.get("extra_context") or "",
             sender_company=body.get("sender_company") or "",
+            sender_name=body.get("sender_name") or "",
+            sender_title=body.get("sender_title") or "",
+            sender_email=body.get("sender_email") or "",
             sender_signature=body.get("sender_signature") or "",
+            company_website=body.get("company_website") or "",
             call_to_action=body.get("call_to_action") or "",
             language=body.get("language") or "auto",
-            extra_context=body.get("extra_context") or "",
             auto_submit=bool(body.get("auto_submit", False)),
         )
     except ogs.GenerationError as e:
         raise _err(e)
     except Exception as e:  # noqa: BLE001
         raise _err(e, 502)
-    return {"message": "草稿已生成，请人工审核", **result}
+    # 生成不等于提交审批：default status 为 draft，由用户主动 Submit for Approval。
+    return {"message": "草稿已生成，可编辑后保存或提交审批", **result}
 
+
+@router.get("/outreach/assistant-options")
+def assistant_options(
+    db: Session = Depends(get_db), user=Depends(require_user),
+):
+    """开发信助手首选项：场景、产品、发件人默认、可用模板（仅公开字段）。
+
+    不向前端暴露 System Prompt / 模板 JSON / 自由度等技术配置。
+    """
+    # 产品关键词来自行业配置
+    products: List[str] = []
+    cfg_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "services", "industry_config.json"
+    )
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        products += [str(k) for k in (cfg.get("product_keywords") or []) if str(k).strip()]
+    except (OSError, json.JSONDecodeError):
+        pass
+    # 补充模板中记录的产品名
+    for t in db.query(PromptTemplate).filter(PromptTemplate.status == "active").all():
+        if t.product_name and t.product_name not in products:
+            products.append(t.product_name)
+    products = products[:50]
+
+    # 发件人默认：当前用户第一个启用的发件账户
+    acct = (
+        db.query(MailSenderAccount)
+        .filter(
+            MailSenderAccount.user_id == user.id,
+            MailSenderAccount.enabled == 1,
+            MailSenderAccount.status == "active",
+        )
+        .order_by(MailSenderAccount.updated_at.desc())
+        .first()
+    )
+    sender = {
+        "sender_company": (acct.display_name or acct.email_address) if acct else "",
+        "sender_name": "",
+        "sender_title": "",
+        "sender_email": acct.email_address if acct else "",
+        "sender_signature": "",
+    }
+
+    templates = [
+        {"id": t.id, "name": t.name, "purpose": t.purpose, "language": t.language}
+        for t in db.query(PromptTemplate)
+        .filter(PromptTemplate.status == "active")
+        .order_by(PromptTemplate.updated_at.desc())
+        .all()
+    ]
+
+    scenarios = [
+        {"value": "first_contact", "label": "首次开发信"},
+        {"value": "followup", "label": "跟进邮件"},
+        {"value": "rfq", "label": "询盘回复"},
+        {"value": "catalog", "label": "产品目录"},
+        {"value": "distributor", "label": "寻找经销商/代理商"},
+        {"value": "promotion", "label": "产品推广"},
+    ]
+    return {
+        "scenarios": scenarios,
+        "products": products,
+        "sender": sender,
+        "templates": templates,
+        "default_template_id": templates[0]["id"] if templates else None,
+    }
 
 # ═══════════════════════════════════════════════════════════════
 # 草稿列表 / 详情 / 状态机

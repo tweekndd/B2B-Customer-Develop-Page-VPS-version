@@ -16,7 +16,17 @@
 - **前端**：AI 分析按钮/结果卡图标 `bi-robot` → `bi-stars`（仅图标，无业务文案）。
 - **测试**：重写 `tests/test_scoring_engine.py` / `tests/test_keyword_analyzer.py` 为通用域，新增「配置 `product_keywords` 后行业专属词可命中」「默认配置不臆断竞品/渠道」「配置竞品/渠道后排除生效」用例。
 
-**验证**：`pytest tests/` 全绿 **488 passed**；`import main` 启动冒烟通过；无数据库迁移、无新增依赖，直接替换文件即可生效。若想恢复某行业能力，只需在 `industry_config.json` 填 `product_keywords`（及可选竞品/渠道/产品映射），无需改代码。
+**验证**：`pytest tests/` 全绿 **513 passed**；`import main` 启动冒烟通过；无数据库迁移、无新增依赖，直接替换文件即可生效。若想恢复某行业能力，只需在 `industry_config.json` 填 `product_keywords`（及可选竞品/渠道/产品映射），无需改代码。
+
+### 📧 开发信 Phase1：AI 智能开发信助手（`开发信优化方案.md` V6.5）
+
+- **统一入口**：客户详情页将 V4.6 与 Phase1 两套开发信生成合并为「AI 智能开发信助手」，单一流程：客户自动加载 → 开发信场景选择 → 产品选择/手动输入 → 邮件语言 → 附加要求（可选） → Generate。
+- **生成≠提交审批**：生成后进入可编辑预览（Subject/Body），默认保存为 **Draft**；仅用户显式点击「Submit for Approval」才进入 **Pending** 审批，后端 `auto_submit` 默认 `false`，不影响现有审批、Himalaya、Worker 发送流程。
+- **默认模板自动发布**：`ensure_seed_templates()` 幂等创建默认模板并自动发布为 **Active**；已存在或用户自定义的模板不覆盖、不重复创建。
+- **产品与发件人变量**：新增 `product.name/keywords/description/key_features/applications/specifications` 及 `system.sender_company/name/title/email/signature/company_website`；缺失时留空，**不臆造规格/认证/联系方式**；残留 `{{...}}` 占位符由渲染器清空，不发给 LLM；Generation Guard 增加 `facts_used` 事实溯源检查。
+- **场景模板**：按 `scenario/purpose` 匹配对应 active 模板，缺少时退回通用 active 模板，不阻断生成。
+- **权限隔离**：普通用户仅能查看/选择模板并生成开发信；System Prompt / User 模板 / 变量 Schema / Model Config / 自由度 / 版本历史仅管理员可见，后端 API（`/api/prompts/*`、`/api/prompts/meta/variables`、`/api/prompts/preview`、版本列表）均执行 `require_admin`，前端 UI 相应隐藏。
+- **增量复用**：保留 PromptTemplate/PromptVersion/GenerationRun/OutreachDraft/outreach_generation_service/prompt_service/prompt_renderer/generation_guard/审批状态机/Himalaya/Worker；未改动邮件发送核心逻辑；保留旧版 `email_composer.py` 兼容；**无数据库迁移、无新增依赖**。
 
 ## v6.4 UI 全面重设计（2026-10-29）
 

@@ -1,4 +1,4 @@
-/* ============================================
+﻿/* ============================================
    AI Trade Customer Analyzer V4.6 - 客户详情页
    ============================================ */
 
@@ -1488,75 +1488,140 @@ document.addEventListener('DOMContentLoaded', () => {
     checkHunterConfigDetail();
     loadLinkedinProfiles();
     loadEmailActivities();
-    loadOutreachTemplates();
+    loadOutreachAssistantOptions();
 });
 
-// ═══════════════════════════════════════════
-// Phase1 外联审批草稿（Prompt 模板 → 审批队列）
-// ═══════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════════════
+// AI 智能开发信助手（统一入口，V6.5 Phase1）
+// ═════════════════════════════════════════════════════════════════════════════
 
-async function loadOutreachTemplates() {
-    const sel = document.getElementById('outreachPromptTemplate');
+let _outreachProducts = [];
+let _outreachDraftId = null;
+
+async function loadOutreachAssistantOptions() {
+    const sel = document.getElementById('outreachProductSelect');
     if (!sel) return;
     try {
-        const r = await _fetchWithTimeout('/api/prompts?status=active');
-        const templates = r.templates || [];
-        templates.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t.id;
-            opt.textContent = `${t.name}（${t.freedom_level}·${t.language}）`;
-            sel.appendChild(opt);
+        const r = await _fetchWithTimeout('/api/outreach/assistant-options');
+        _outreachProducts = r.products || [];
+        // 产品下拉
+        _outreachProducts.forEach(p => {
+            const o = document.createElement('option');
+            o.value = p;
+            o.textContent = p;
+            sel.appendChild(o);
         });
-        if (templates.length === 0) {
-            const opt = document.createElement('option');
-            opt.value = '';
-            opt.textContent = '（暂无 active 模板，请到 Prompt 管理页发布）';
-            sel.appendChild(opt);
+        // 语言与场景已写死在 HTML 中，保持简洁；可从 r.scenarios / r.templates 扩展
+        const langInfo = document.getElementById('outreachLangInfo');
+        if (langInfo && r.sender && r.sender.sender_email) {
+            langInfo.textContent = `发件默认：${_esc(r.sender.sender_company || r.sender.sender_email)}`;
         }
-    } catch (e) { console.warn('加载模板失败', e); }
+    } catch (e) {
+        console.warn('加载助手选项失败', e);
+    }
 }
 
-async function generateOutreachDraft() {
-    const btn = document.getElementById('btnOutreachDraft');
-    const loading = document.getElementById('outreachDraftLoading');
-    const result = document.getElementById('outreachDraftResult');
-    const templateId = document.getElementById('outreachPromptTemplate').value;
-    const productName = document.getElementById('outreachProductName').value.trim();
-    const keywords = document.getElementById('emailDraftKeywords').value.trim();
+function toggleOutreachProductInput() {
+    const custom = document.getElementById('outreachProductCustom');
+    custom.classList.toggle('d-none');
+    if (!custom.classList.contains('d-none')) custom.focus();
+}
+
+async function generateOutreachEmail() {
+    const btn = document.getElementById('btnOutreachGenerate');
+    const loading = document.getElementById('outreachGenerateLoading');
+    const result = document.getElementById('outreachResult');
+    const msg = document.getElementById('outreachResultMsg');
+    const riskBox = document.getElementById('outreachRiskFlags');
 
     btn.disabled = true;
     loading.classList.remove('d-none');
     result.classList.add('d-none');
+    msg.textContent = '';
+    riskBox.innerHTML = '';
+
+    const scenario = document.getElementById('outreachScenario').value;
+    const productSel = document.getElementById('outreachProductSelect').value;
+    const productCustom = document.getElementById('outreachProductCustom').value.trim();
+    const productName = productSel || productCustom || '';
+    const keywords = document.getElementById('outreachProductKeywords').value.trim();
+    const language = document.getElementById('outreachLanguage').value;
+    const extra = document.getElementById('outreachExtraContext').value.trim();
+
+    const payload = {
+        scenario: scenario || 'first_contact',
+        product_name: productName,
+        product_keywords: keywords ? keywords.split(',').map(s => s.trim()).filter(Boolean) : [],
+        language: language || 'auto',
+        extra_context: extra,
+        auto_submit: false,
+    };
+    if (productSel) payload.product = { name: productSel };
+
     try {
-        const payload = { auto_submit: true };
-        if (templateId) payload.template_id = Number(templateId);
-        if (productName) payload.product_name = productName;
-        if (keywords) payload.product_keywords = keywords.split(',').map(s => s.trim()).filter(Boolean);
         const r = await _fetchWithTimeout(`/api/customers/${customerId}/outreach/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         }, 60000);
         const d = r.draft || {};
-        const risks = (d.risk_flags || []).map(x => `<span class="badge bg-danger me-1">${_esc(x)}</span>`).join('');
-        result.innerHTML = `
-            <div class="alert alert-success py-2 mb-2"><i class="bi bi-check-circle"></i> 草稿已生成并送审（草稿 #${d.id}）</div>
-            <div class="border rounded p-2 mb-2">
-                <div class="fw-bold small">${_esc(d.subject || '')}</div>
-                <div class="text-secondary small" style="white-space:pre-wrap;max-height:150px;overflow:auto;">${_esc(d.body || '')}</div>
-            </div>
-            <div class="mb-1">${risks || '<span class="text-success small"><i class="bi bi-shield-check"></i> 无风险标记</span>'}</div>
-            <div class="small text-secondary">模型：${_esc(d.model || '-')} · 溯源：${_esc((d.facts_used || []).join('；') || '无')}</div>
-            <a class="btn btn-sm btn-outline-info mt-2" href="/outreach" onclick="navigate(event,'/outreach')">
-                <i class="bi bi-inbox"></i> 前往邮件审核审批发送
-            </a>`;
-        result.classList.remove('d-none');
-        showToast(`草稿 #${d.id} 已生成并进入待审批`, 'success');
+        _outreachDraftId = d.id || null;
+        document.getElementById('outreachDraftIdNum').textContent = d.id || '-';
+        renderOutreachResult(d);
+        showToast('开发信已生成（草稿，未提交审批）', 'success');
     } catch (err) {
-        result.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle"></i> ${_esc(err.message)}</div>`;
         result.classList.remove('d-none');
+        result.innerHTML = `<div class="alert alert-danger mb-0"><i class="bi bi-exclamation-triangle me-1"></i>生成失败: ${_esc(err.message)}</div>`;
     } finally {
         btn.disabled = false;
         loading.classList.add('d-none');
+    }
+}
+
+function renderOutreachResult(d) {
+    const result = document.getElementById('outreachResult');
+    const langInfo = document.getElementById('outreachResultLang');
+    const riskBox = document.getElementById('outreachRiskFlags');
+    document.getElementById('outreachSubject').value = d.subject || '';
+    document.getElementById('outreachBody').value = d.body || '';
+    if (langInfo) langInfo.textContent = d.language || '-';
+    const risks = (d.risk_flags || []).map(x => `<span class="badge bg-danger me-1">${_esc(x)}</span>`).join('');
+    riskBox.innerHTML = risks || '<span class="text-success small"><i class="bi bi-shield-check"></i> 无风险标记</span>';
+    result.classList.remove('d-none');
+}
+
+async function saveOutreachDraft() {
+    if (!_outreachDraftId) { showToast('请先生成开发信', 'warning'); return; }
+    const subject = document.getElementById('outreachSubject').value.trim();
+    const body = document.getElementById('outreachBody').value.trim();
+    if (!subject || !body) { showToast('主题和正文不能为空', 'warning'); return; }
+    try {
+        await _fetchWithTimeout(`/api/outreach/drafts/${_outreachDraftId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject: subject, body: body }),
+        });
+        showToast('草稿已保存', 'success');
+    } catch (err) {
+        showToast('保存失败: ' + _esc(err.message), 'danger');
+    }
+}
+
+async function regenerateOutreachEmail() {
+    generateOutreachEmail();
+}
+
+async function submitOutreachDraft() {
+    if (!_outreachDraftId) { showToast('请先生成开发信', 'warning'); return; }
+    try {
+        const r = await _fetchWithTimeout(`/api/outreach/drafts/${_outreachDraftId}/submit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        showToast('已提交审批，进入 Pending 状态', 'success');
+        document.getElementById('outreachResultMsg').textContent = '状态：已提交人工审批';
+    } catch (err) {
+        showToast('提交失败: ' + _esc(err.message), 'danger');
     }
 }
